@@ -1,0 +1,52 @@
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Packaging and build output
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Docker and local runtime files
+docker-compose.override.yml
+*.log
+*.pid
+product-memory-backup.sql
+
+# Local knowledge documents
+/knowledge/**
+!/knowledge/
+!/knowledge/.README.md
+!/knowledge/example-knowledge.md
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local agent/client configuration
+.codex/
+.mcp.json
+.github/mcp.json

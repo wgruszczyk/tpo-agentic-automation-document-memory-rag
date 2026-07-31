@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "product-memory-rag"
+version = "0.1.0"
+description = "Local, portable RAG knowledge base exposed through MCP for GitHub Copilot and OpenAI Codex."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Product Memory contributors" }]
+dependencies = [
+  "mcp>=2,<3",
+  "psycopg[binary]>=3.2,<4",
+  "pgvector>=0.4,<1",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "sentence-transformers>=3.3,<6",
+  "langchain-text-splitters>=0.3,<2",
+  "openai>=1.60,<3",
+  "python-dateutil>=2.9,<3",
+  "PyYAML>=6,<7",
+  "typer>=0.15,<1",
+  "rich>=13,<15",
+  "numpy>=1.26,<3",
+  "uvicorn>=0.34,<1",
+  "starlette>=0.45,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+product-memory = "product_memory.cli:app"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+product_memory = ["schema.sql"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
