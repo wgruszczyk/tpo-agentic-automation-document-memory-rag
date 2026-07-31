@@ -30,6 +30,7 @@ dist/
 
 # Docker and local runtime files
 docker-compose.override.yml
+docker-compose.knowledge-links.yml
 *.log
 *.pid
 product-memory-backup.sql

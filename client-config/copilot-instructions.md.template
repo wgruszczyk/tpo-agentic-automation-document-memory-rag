@@ -1,6 +1,6 @@
-# Product memory
+# TPO Automation Document RAG
 
-Use the `product-memory` MCP server whenever a task may depend on historical product knowledge,
+Use the `tpo-automation-document-rag` MCP server whenever a task may depend on historical product knowledge,
 meeting transcripts, requirements, decisions, risks, or stakeholder commitments. Start with
 `retrieve_knowledge`, inspect whole documents when needed, and cite the returned source path and date.
 Prefer newer sources but surface conflicts rather than silently discarding older information.

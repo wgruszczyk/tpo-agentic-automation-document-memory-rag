@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,8 @@ LOGGER = logging.getLogger(__name__)
 INDEX_STATE_KEY = "index_profile"
 INDEX_LOCK = "product_memory_index_rebuild"
 PIPELINE_VERSION = "1"
+EXAMPLE_KNOWLEDGE_PATH = "example-knowledge.md"
+KNOWLEDGE_README_PATHS = {"README.md", ".README.md"}
 
 
 class IngestionService:
@@ -124,18 +127,12 @@ class IngestionService:
     def _scan_once_locked(self, profile: dict[str, Any]) -> dict[str, int]:
         root = self.settings.knowledge_dir
         root.mkdir(parents=True, exist_ok=True)
-        paths = sorted(
-            path
-            for path in root.rglob("*")
-            if path.is_file()
-            and path.suffix.lower() in self.settings.extensions
-            and not any(part.startswith(".") for part in path.parts)
-        )
+        paths = self._discover_paths(root)
         found_paths: set[str] = set()
         added = updated = unchanged = failed = 0
 
         for path in paths:
-            relative_path = path.resolve().relative_to(root.resolve()).as_posix()
+            relative_path = self._relative_source_path(root, path)
             found_paths.add(relative_path)
             try:
                 parsed = self.parser.parse(path)
@@ -161,6 +158,58 @@ class IngestionService:
         if added or updated or removed or failed:
             LOGGER.info("Ingestion scan: %s", result)
         return result
+
+    def _discover_paths(self, root: Path) -> list[Path]:
+        paths = sorted(
+            path
+            for path in self._walk_files(root)
+            if self._is_supported_visible_file(root, path)
+        )
+        relative_paths = {self._relative_source_path(root, path) for path in paths}
+        if self._has_real_knowledge_document(relative_paths):
+            paths = [
+                path
+                for path in paths
+                if self._relative_source_path(root, path) != EXAMPLE_KNOWLEDGE_PATH
+            ]
+        return paths
+
+    @staticmethod
+    def _walk_files(root: Path) -> list[Path]:
+        files: list[Path] = []
+        seen_dirs: set[Path] = set()
+        for dirpath, dirnames, filenames in os.walk(root.absolute(), followlinks=True):
+            directory = Path(dirpath)
+            try:
+                real_directory = directory.resolve()
+            except OSError:
+                dirnames[:] = []
+                continue
+
+            if real_directory in seen_dirs:
+                dirnames[:] = []
+                continue
+            seen_dirs.add(real_directory)
+
+            dirnames[:] = [dirname for dirname in dirnames if not dirname.startswith(".")]
+            files.extend(directory / filename for filename in filenames)
+        return files
+
+    def _is_supported_visible_file(self, root: Path, path: Path) -> bool:
+        if not path.is_file() or path.suffix.lower() not in self.settings.extensions:
+            return False
+        relative_path = self._relative_source_path(root, path)
+        if relative_path in KNOWLEDGE_README_PATHS:
+            return False
+        return not any(part.startswith(".") for part in Path(relative_path).parts)
+
+    @staticmethod
+    def _has_real_knowledge_document(relative_paths: set[str]) -> bool:
+        return any(path != EXAMPLE_KNOWLEDGE_PATH for path in relative_paths)
+
+    @staticmethod
+    def _relative_source_path(root: Path, path: Path) -> str:
+        return path.absolute().relative_to(root.absolute()).as_posix()
 
     def _upsert_document(self, parsed: ParsedDocument, profile_hash: str) -> str:
         with self.db.connection() as conn:

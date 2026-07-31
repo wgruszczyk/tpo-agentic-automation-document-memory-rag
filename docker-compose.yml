@@ -30,7 +30,7 @@ services:
       - "${HOST_KNOWLEDGE_DIR:-./knowledge}:/knowledge:ro"
       - huggingface_cache:/models/huggingface
     ports:
-      - "127.0.0.1:${MCP_PORT:-8080}:8080"
+      - "127.0.0.1:${MCP_PORT:-2600}:8080"
     command:
       - uvicorn
       - product_memory.mcp_server:app

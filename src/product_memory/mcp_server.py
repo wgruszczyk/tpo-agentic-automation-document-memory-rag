@@ -17,7 +17,7 @@ LOGGER = logging.getLogger(__name__)
 runtime = Runtime()
 
 SERVER_INSTRUCTIONS = """
-Use this server as the product-memory source of truth. Search before answering questions that may
+Use this server as the tpo-automation-document-rag source of truth. Search before answering questions that may
 depend on meetings, decisions, requirements, risks, or historical context. Prefer retrieve_knowledge
 when solving a problem: it returns ranked chunks, complete top documents, dates, scores, and a compact
 context pack. Treat newer evidence as more relevant but report conflicts instead of silently replacing
@@ -50,8 +50,8 @@ async def lifespan(server: MCPServer) -> AsyncIterator[dict[str, str]]:
 
 
 mcp = MCPServer(
-    "product-memory",
-    title="Local Product Memory",
+    "tpo-automation-document-rag",
+    title="TPO Automation Document RAG",
     description="Local hybrid RAG over automatically ingested text files.",
     instructions=SERVER_INSTRUCTIONS,
     version=__version__,
@@ -95,7 +95,7 @@ def search(query: str, limit: int = 10, project: str | None = None) -> dict:
 
 @mcp.tool()
 def fetch(id: str) -> dict:  # noqa: A002
-    """Fetch a complete document or a complete chunk by id or product-memory URI."""
+    """Fetch a complete document or a complete chunk by id or tpo-automation-document-rag URI."""
     return runtime.retriever.fetch(id).model_dump(mode="json")
 
 

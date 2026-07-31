@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql://product_memory:product_memory_local_only@db:5432/product_memory"
     knowledge_dir: Path = Path("/knowledge")
-    scan_interval_seconds: float = 5.0
+    scan_interval_seconds: float = 30.0
     supported_extensions: str = ".txt,.md,.markdown,.rst,.log,.vtt,.srt"
 
     chunk_size: int = Field(default=1800, ge=300)
@@ -43,7 +43,13 @@ class Settings(BaseSettings):
     mcp_allowed_hosts: str = "localhost,localhost:*,127.0.0.1,127.0.0.1:*,[::1],[::1]:*"
     log_level: str = "INFO"
 
-    @field_validator("embedding_revision", "openai_api_key", "openai_base_url", mode="before")
+    @field_validator(
+        "embedding_revision",
+        "embedding_dimensions",
+        "openai_api_key",
+        "openai_base_url",
+        mode="before",
+    )
     @classmethod
     def empty_to_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():

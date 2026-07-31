@@ -105,3 +105,19 @@ def test_ignores_labeled_metadata_inside_transcript_body(tmp_path: Path) -> None
     assert parsed.title == "2026 06 15 teams notes"
     assert parsed.effective_at == datetime(2026, 6, 15, tzinfo=UTC)
     assert parsed.metadata["speakers"] == ["Alice Brown", "Bob Smith"]
+
+
+def test_source_path_stays_relative_for_symlinked_document(tmp_path: Path) -> None:
+    knowledge_dir = tmp_path / "knowledge"
+    external_dir = tmp_path / "teams-source"
+    external_dir.mkdir(parents=True)
+    knowledge_dir.mkdir()
+    path = external_dir / "meeting.md"
+    path.write_text("Useful knowledge", encoding="utf-8")
+    (knowledge_dir / "teams").symlink_to(external_dir, target_is_directory=True)
+
+    parsed = DocumentParser(Settings(knowledge_dir=knowledge_dir)).parse(
+        knowledge_dir / "teams" / "meeting.md"
+    )
+
+    assert parsed.source_path == "teams/meeting.md"

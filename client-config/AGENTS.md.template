@@ -1,7 +1,7 @@
-# Product-memory rules
+# TPO Automation Document RAG Rules
 
 For questions involving product history, meetings, requirements, decisions, risks, stakeholders,
-or prior commitments, use the `product-memory` MCP server before forming a conclusion.
+or prior commitments, use the `tpo-automation-document-rag` MCP server before forming a conclusion.
 
 1. Prefer `retrieve_knowledge` for investigations and implementation planning.
 2. Use `search` followed by `fetch` when you need specific complete source documents.

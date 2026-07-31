@@ -89,7 +89,7 @@ class Retriever:
             SearchItem(
                 id=document.id,
                 title=document.title,
-                url=f"product-memory://document/{document.id}",
+                url=f"tpo-automation-document-rag://document/{document.id}",
                 text=self._best_snippet(document.id, response.chunks),
                 score=document.score,
                 metadata={
@@ -117,7 +117,7 @@ class Retriever:
                     id=str(document["id"]),
                     title=document["title"],
                     text=document["content"],
-                    url=f"product-memory://document/{document['id']}",
+                    url=f"tpo-automation-document-rag://document/{document['id']}",
                     metadata={
                         **dict(document["metadata"]),
                         "source_path": document["source_path"],
@@ -140,7 +140,7 @@ class Retriever:
                     id=str(chunk["id"]),
                     title=f"{chunk['title']} — chunk {chunk['chunk_index']}",
                     text=chunk["content"],
-                    url=f"product-memory://chunk/{chunk['id']}",
+                    url=f"tpo-automation-document-rag://chunk/{chunk['id']}",
                     metadata={
                         **dict(chunk["metadata"]),
                         "document_id": str(chunk["document_id"]),
@@ -285,7 +285,7 @@ class Retriever:
     def _documents_for_chunks(
         self, chunks: list[ChunkResult], limit: int, include_content: bool
     ) -> list[DocumentResult]:
-        grouped: "OrderedDict[str, list[ChunkResult]]" = OrderedDict()
+        grouped: OrderedDict[str, list[ChunkResult]] = OrderedDict()
         for chunk in chunks:
             grouped.setdefault(chunk.document_id, []).append(chunk)
         selected_ids = list(grouped.keys())[:limit]

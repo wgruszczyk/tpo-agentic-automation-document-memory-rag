@@ -2,7 +2,7 @@
 
 A local, portable knowledge base for AI agents. Drop transcripts and notes into `knowledge/`;
 the app automatically detects them, splits them into chunks, creates embeddings, stores them in
-PostgreSQL + pgvector, and exposes them through MCP at `http://localhost:8080/mcp`.
+PostgreSQL + pgvector, and exposes them through MCP at `http://localhost:2600/mcp`.
 
 The project is optimized for:
 
@@ -98,7 +98,7 @@ make start
 Check the status:
 
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:2600/health
 ```
 
 ```bash
@@ -112,7 +112,8 @@ make smoke
 ```
 
 After the test, you can remove `knowledge/example-knowledge.md`; the scanner will automatically
-remove it from the index.
+remove it from the index. If you leave it in place, it is indexed only while it is the only
+knowledge document. As soon as you add real documents, the scanner ignores the example file.
 
 Logs:
 
@@ -140,8 +141,29 @@ Supported formats:
 .txt .md .markdown .rst .log .vtt .srt
 ```
 
+You can also link external folders into the knowledge inbox without copying documents. Configure
+semicolon-separated links in `.env`:
+
+```dotenv
+KNOWLEDGE_LINKED_DIRS=teams=/Users/me/Documents/Teams Transcripts;notes=~/Documents/Product Notes
+```
+
+Then create or refresh the symlinks:
+
+```bash
+make link-knowledge
+```
+
+Each `name=/path/to/folder` entry creates `knowledge/name`. If you omit `name=`, the folder basename
+is used. The command updates existing symlinks, but refuses to overwrite real files or directories.
+The scanner follows linked directories and stores logical source paths such as `teams/meeting.vtt`.
+For Docker, the command also writes an ignored `docker-compose.knowledge-links.yml` file that mounts
+linked targets read-only so the container can follow the symlinks.
+
 The scanner runs periodically. A new or changed file is indexed automatically. Deleting a file
 removes it from the active index, but the document record remains in the database as inactive.
+`knowledge/.README.md` and `knowledge/README.md` are never indexed, and they do not count as real
+knowledge documents when deciding whether to ignore `knowledge/example-knowledge.md`.
 
 Force a scan manually:
 
@@ -231,13 +253,13 @@ LangChain is used for recursive document splitting. The agent can further compre
 The simplest option:
 
 ```bash
-copilot mcp add --transport http product-memory http://localhost:8080/mcp
+copilot mcp add --transport http tpo-automation-document-rag http://localhost:2600/mcp
 ```
 
 Check it:
 
 ```bash
-copilot mcp show product-memory
+copilot mcp show tpo-automation-document-rag
 ```
 
 Alternatively, copy `client-config/copilot-cli-mcp.json` to:
@@ -265,9 +287,9 @@ to:
 or add an HTTP server in Copilot's MCP settings:
 
 ```text
-Name: product-memory
+Name: tpo-automation-document-rag
 Type: HTTP / Streamable HTTP
-URL: http://localhost:8080/mcp
+URL: http://localhost:2600/mcp
 ```
 
 It is useful to copy this file into the working repository:
@@ -308,7 +330,7 @@ codex mcp list
 ```
 
 The same configuration is shared by Codex CLI and the IDE extension. In the extension, you can also
-add a **Streamable HTTP** server with the address `http://localhost:8080/mcp`.
+add a **Streamable HTTP** server with the address `http://localhost:2600/mcp`.
 
 Copy this into the repository where Codex works:
 
@@ -325,19 +347,19 @@ AGENTS.md
 ## Example Agent Prompts
 
 ```text
-Use product-memory retrieve_knowledge before answering.
+Use tpo-automation-document-rag retrieve_knowledge before answering.
 Find the current decisions about payment retries. Compare them with older decisions,
 identify contradictions and cite source_path, effective_at, document_id and chunk_id.
 ```
 
 ```text
-Use product-memory. Find the decisions about MVP scope, show full sources,
+Use tpo-automation-document-rag. Find the decisions about MVP scope, show full sources,
 separate current decisions from historical ones, and list open questions.
 ```
 
 ```text
 Before implementing this ticket, retrieve relevant product requirements and decisions
-from product-memory. Use the newest evidence, but report conflicts instead of choosing silently.
+from tpo-automation-document-rag. Use the newest evidence, but report conflicts instead of choosing silently.
 ```
 
 ## Change the Local Model
@@ -416,7 +438,7 @@ scan is simpler, provides full recall, and makes changing the model dimension ea
 HTTP status:
 
 ```bash
-curl -s http://localhost:8080/health | python -m json.tool
+curl -s http://localhost:2600/health | python -m json.tool
 ```
 
 Logs:

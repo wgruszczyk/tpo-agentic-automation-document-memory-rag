@@ -1,32 +1,42 @@
-.PHONY: start stop restart logs status ingest reindex smoke test clean
+COMPOSE_FILES := -f docker-compose.yml
+ifneq ($(wildcard docker-compose.knowledge-links.yml),)
+COMPOSE_FILES += -f docker-compose.knowledge-links.yml
+endif
+COMPOSE := docker compose $(COMPOSE_FILES)
+
+.PHONY: start stop restart logs status ingest reindex smoke link-knowledge test clean
 
 start:
 	@test -f .env || cp .env.example .env
-	docker compose up -d --build
+	$(COMPOSE) up -d --build
 
 stop:
-	docker compose down
+	$(COMPOSE) down
 
 restart:
-	docker compose restart product-memory
+	$(COMPOSE) restart product-memory
 
 logs:
-	docker compose logs -f product-memory
+	$(COMPOSE) logs -f product-memory
 
 status:
-	docker compose exec product-memory product-memory status
+	$(COMPOSE) exec product-memory product-memory status
 
 ingest:
-	docker compose exec product-memory product-memory ingest-once
+	$(COMPOSE) exec product-memory product-memory ingest-once
 
 reindex:
-	docker compose exec product-memory product-memory reindex
+	$(COMPOSE) exec product-memory product-memory reindex
 
 smoke:
-	docker compose exec product-memory product-memory smoke-test
+	$(COMPOSE) exec product-memory product-memory smoke-test
+
+link-knowledge:
+	@test -f .env || cp .env.example .env
+	python scripts/link_knowledge.py
 
 test:
 	python -m pytest
 
 clean:
-	docker compose down -v
+	$(COMPOSE) down -v

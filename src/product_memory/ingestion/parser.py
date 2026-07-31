@@ -46,7 +46,7 @@ class DocumentParser:
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
         effective_at = self._effective_date(path, metadata, modified_at)
         title = self._title(path, metadata, content)
-        relative_path = path.resolve().relative_to(self.settings.knowledge_dir.resolve()).as_posix()
+        relative_path = path.absolute().relative_to(self.settings.knowledge_dir.absolute()).as_posix()
 
         normalized_metadata = dict(metadata)
         normalized_metadata.setdefault("title", title)

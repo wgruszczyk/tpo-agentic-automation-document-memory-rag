@@ -46,7 +46,7 @@ def status() -> None:
 
 
 @app.command("smoke-test")
-def smoke_test(url: str = "http://127.0.0.1:8080/mcp") -> None:
+def smoke_test(url: str = "http://127.0.0.1:2600/mcp") -> None:
     """Connect through MCP, list tools, and execute a real retrieval against the sample knowledge."""
     from mcp import Client
 
