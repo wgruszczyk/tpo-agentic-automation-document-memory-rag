@@ -36,7 +36,7 @@ knowledge/*.txt, *.md, *.vtt, *.srt
                  v
        automatic directory scanner
                  |
-        parser + YAML metadata
+        parser + optional metadata inference
                  |
      LangChain RecursiveTextSplitter
                  |
@@ -151,11 +151,26 @@ make ingest
 
 ## Metadata and Freshness
 
-Newer knowledge receives a ranking boost. The document date is determined in this order:
+YAML front matter is optional. If you provide it, those values take precedence. If you only drop in
+a Teams/WebVTT transcript, the parser infers reliable metadata from the file and transcript content.
+
+The document date is determined in this order:
 
 1. `effective_at` or `date` in YAML front matter,
-2. a `YYYY-MM-DD` date in the filename,
-3. the file's last modification date.
+2. an explicit transcript label such as `Meeting date:`, `Date:`, or `Started at:`,
+3. a `YYYY-MM-DD` date in the filename,
+4. the file's last modification date.
+
+For Teams-style WebVTT transcripts, the parser also captures reliable fields when present:
+
+- meeting title from labels such as `Meeting title:`, `Title:`, `Topic:`, or `Subject:`,
+- speakers from WebVTT voice tags like `<v Alice Brown>`,
+- language and duration from WebVTT `NOTE` fields,
+- source type and transcript format.
+
+Ambiguous numeric dates such as `08/01/2026` are ignored unless the filename or explicit metadata
+resolves the date. The parser does not infer `project` from free text; add it in front matter when
+you want project filtering.
 
 Recommended format:
 
@@ -479,7 +494,7 @@ The MCP server itself uses the official Python MCP SDK v2 and Streamable HTTP tr
 ## First-Version Limitations
 
 - No OCR or PDF/DOCX support; inputs are text files.
-- No speaker recognition beyond information already present in the transcript.
+- Speaker lists are inferred only from explicit transcript speaker markers, such as WebVTT voice tags.
 - No generative extraction of decisions and requirements; the system indexes source text.
 - No multi-user authorization, because the server is intended for local `localhost` use.
 - `MAX_FULL_DOCUMENT_CHARS` limits exceptionally long documents in one MCP result; split the full

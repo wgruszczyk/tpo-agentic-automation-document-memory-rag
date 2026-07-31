@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 from dateutil import parser as date_parser
 
+from product_memory.ingestion.metadata import infer_document_metadata
 from product_memory.settings import Settings
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -35,11 +36,12 @@ class DocumentParser:
 
     def parse(self, path: Path) -> ParsedDocument:
         raw = self._read_text(path)
-        metadata, content = self._extract_frontmatter(raw)
+        frontmatter, content = self._extract_frontmatter(raw)
         content = content.strip()
         if not content:
             raise ValueError(f"Document is empty: {path}")
 
+        metadata = {**infer_document_metadata(path, content), **frontmatter}
         stat = path.stat()
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
         effective_at = self._effective_date(path, metadata, modified_at)

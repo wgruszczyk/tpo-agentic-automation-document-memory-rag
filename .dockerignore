@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+*.pyc
+knowledge/*
+!knowledge/.README.md
+!knowledge/example-knowledge.md
+postgres_data
+product-memory-backup.sql
