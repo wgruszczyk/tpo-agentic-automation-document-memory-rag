@@ -223,7 +223,7 @@ class Retriever:
             "half_life": self.settings.recency_half_life_days,
             "project": project,
         }
-        project_clause = "AND (%(project)s IS NULL OR d.metadata->>'project' = %(project)s)"
+        project_clause = "AND (%(project)s::text IS NULL OR d.metadata->>'project' = %(project)s::text)"
         sql = f"""
             WITH scored AS (
                 SELECT

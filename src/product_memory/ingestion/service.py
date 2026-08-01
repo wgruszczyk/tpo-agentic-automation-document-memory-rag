@@ -298,15 +298,16 @@ class IngestionService:
                     )
                 )
             if rows:
-                conn.executemany(
-                    """
-                    INSERT INTO chunks (
-                        id, document_id, chunk_index, content, start_char, end_char,
-                        approx_tokens, embedding, embedding_profile_hash
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    rows,
-                )
+                with conn.cursor() as cursor:
+                    cursor.executemany(
+                        """
+                        INSERT INTO chunks (
+                            id, document_id, chunk_index, content, start_char, end_char,
+                            approx_tokens, embedding, embedding_profile_hash
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        rows,
+                    )
             conn.execute(
                 "UPDATE documents SET indexed_profile_hash = %s, updated_at = now() WHERE id = %s",
                 (profile_hash, document_id),
