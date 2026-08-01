@@ -157,7 +157,7 @@ make link-knowledge
 Each `name=/path/to/folder` entry creates `knowledge/name`. If you omit `name=`, the folder basename
 is used. The command updates existing symlinks, but refuses to overwrite real files or directories.
 The scanner follows linked directories and stores logical source paths such as `teams/meeting.vtt`.
-For Docker, the command also writes an ignored `docker-compose.knowledge-links.yml` file that mounts
+For Docker, the command also writes an ignored `docker-compose.override.yml` file that mounts
 linked targets read-only so the container can follow the symlinks.
 
 The scanner runs periodically. A new or changed file is indexed automatically. Deleting a file

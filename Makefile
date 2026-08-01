@@ -1,6 +1,6 @@
 COMPOSE_FILES := -f docker-compose.yml
-ifneq ($(wildcard docker-compose.knowledge-links.yml),)
-COMPOSE_FILES += -f docker-compose.knowledge-links.yml
+ifneq ($(wildcard docker-compose.override.yml),)
+COMPOSE_FILES += -f docker-compose.override.yml
 endif
 COMPOSE := docker compose $(COMPOSE_FILES)
 
