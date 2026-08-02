@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+from docx import Document as DocxDocument
+
 from product_memory.ingestion.parser import DocumentParser
 from product_memory.settings import Settings
 
@@ -121,3 +123,82 @@ def test_source_path_stays_relative_for_symlinked_document(tmp_path: Path) -> No
     )
 
     assert parsed.source_path == "teams/meeting.md"
+
+
+def test_extracts_docx_content_and_properties(tmp_path: Path) -> None:
+    path = tmp_path / "checkout-requirements.docx"
+    document = DocxDocument()
+    document.core_properties.title = "Checkout Requirements"
+    document.core_properties.author = "Product Team"
+    document.add_heading("Checkout Requirements", level=1)
+    document.add_paragraph("The checkout flow must support saved cards.")
+    table = document.add_table(rows=1, cols=2)
+    table.rows[0].cells[0].text = "Priority"
+    table.rows[0].cells[1].text = "High"
+    document.save(path)
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert parsed.title == "Checkout Requirements"
+    assert "saved cards" in parsed.content
+    assert "Priority | High" in parsed.content
+    assert parsed.metadata["author"] == "Product Team"
+    assert parsed.metadata["source_format"] == "docx"
+    assert parsed.metadata["extension"] == ".docx"
+
+
+def test_extracts_pdf_content_and_properties(tmp_path: Path) -> None:
+    path = tmp_path / "pricing-requirements.pdf"
+    _write_simple_pdf(path, "Pricing Requirements", "Discount approval requires finance review.")
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert parsed.title == "Pricing Requirements"
+    assert "finance review" in parsed.content
+    assert parsed.metadata["source_format"] == "pdf"
+    assert parsed.metadata["page_count"] == 1
+    assert parsed.metadata["extension"] == ".pdf"
+
+
+def _write_simple_pdf(path: Path, title: str, body: str) -> None:
+    lines = [title, body]
+    text_commands = ["BT", "/F1 12 Tf", "72 720 Td"]
+    for index, line in enumerate(lines):
+        if index:
+            text_commands.append("0 -18 Td")
+        text_commands.append(f"({_escape_pdf_text(line)}) Tj")
+    text_commands.append("ET")
+    stream = "\n".join(text_commands).encode("ascii")
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Title (" + _escape_pdf_text(title).encode("ascii") + b") >>",
+    ]
+
+    content = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, pdf_object in enumerate(objects, start=1):
+        offsets.append(len(content))
+        content.extend(f"{number} 0 obj\n".encode("ascii"))
+        content.extend(pdf_object)
+        content.extend(b"\nendobj\n")
+
+    xref_offset = len(content)
+    content.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    content.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        content.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    content.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R /Info 6 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+    )
+    path.write_bytes(bytes(content))
+
+
+def _escape_pdf_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")

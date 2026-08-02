@@ -6,6 +6,11 @@ def test_default_scan_interval_is_30_seconds() -> None:
     assert settings.scan_interval_seconds == 30.0
 
 
+def test_default_supported_extensions_include_documents() -> None:
+    settings = Settings(_env_file=None)
+    assert {".txt", ".md", ".vtt", ".srt", ".pdf", ".docx"}.issubset(settings.extensions)
+
+
 def test_empty_optional_embedding_dimensions_is_none() -> None:
     settings = Settings(embedding_dimensions="")
     assert settings.embedding_dimensions is None

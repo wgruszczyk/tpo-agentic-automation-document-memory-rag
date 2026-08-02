@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 from dateutil import parser as date_parser
 
+from product_memory.ingestion.extractors import extract_document
 from product_memory.ingestion.metadata import infer_document_metadata
 from product_memory.settings import Settings
 
@@ -35,13 +36,13 @@ class DocumentParser:
         self.settings = settings
 
     def parse(self, path: Path) -> ParsedDocument:
-        raw = self._read_text(path)
-        frontmatter, content = self._extract_frontmatter(raw)
+        extracted = extract_document(path)
+        frontmatter, content = self._extract_frontmatter(extracted.content)
         content = content.strip()
         if not content:
             raise ValueError(f"Document is empty: {path}")
 
-        metadata = {**infer_document_metadata(path, content), **frontmatter}
+        metadata = {**extracted.metadata, **infer_document_metadata(path, content), **frontmatter}
         stat = path.stat()
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
         effective_at = self._effective_date(path, metadata, modified_at)
@@ -65,15 +66,6 @@ class DocumentParser:
             effective_at=effective_at,
             metadata=normalized_metadata,
         )
-
-    @staticmethod
-    def _read_text(path: Path) -> str:
-        for encoding in ("utf-8", "utf-8-sig", "cp1250", "latin-1"):
-            try:
-                return path.read_text(encoding=encoding)
-            except UnicodeDecodeError:
-                continue
-        raise UnicodeDecodeError("unknown", b"", 0, 1, f"Cannot decode {path}")
 
     @staticmethod
     def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
