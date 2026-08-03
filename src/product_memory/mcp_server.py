@@ -11,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from product_memory import __version__
+from product_memory.inspection import inspect_documents
 from product_memory.runtime import Runtime
 
 LOGGER = logging.getLogger(__name__)
@@ -130,6 +131,51 @@ async def health(request: Request) -> Response:
         return JSONResponse(status, status_code=code)
     except Exception as exc:
         return JSONResponse({"status": "starting", "detail": str(exc)}, status_code=503)
+
+
+@mcp.custom_route("/debug/documents", methods=["GET"])
+async def debug_documents(request: Request) -> Response:
+    try:
+        result = await asyncio.to_thread(
+            inspect_documents,
+            runtime.db,
+            active_only=_query_bool(request, "active_only", default=False),
+            project=request.query_params.get("project"),
+            limit=_query_int(request, "limit", default=500),
+            offset=_query_int(request, "offset", default=0),
+            include_content=_query_bool(request, "include_content", default=False),
+            include_chunks=_query_bool(request, "include_chunks", default=True),
+            include_embeddings=_query_bool(request, "include_embeddings", default=False),
+            content_preview_chars=_query_int(request, "content_preview_chars", default=500),
+        )
+        return JSONResponse(result)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as exc:
+        LOGGER.exception("Document debug endpoint failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+def _query_bool(request: Request, name: str, *, default: bool) -> bool:
+    value = request.query_params.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
+def _query_int(request: Request, name: str, *, default: int) -> int:
+    value = request.query_params.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 security = TransportSecuritySettings(

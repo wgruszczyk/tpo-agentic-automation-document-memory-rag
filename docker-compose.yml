@@ -54,4 +54,6 @@ services:
 
 volumes:
   postgres_data:
+    name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_postgres_data
   huggingface_cache:
+    name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_huggingface_cache

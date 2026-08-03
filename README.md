@@ -97,7 +97,9 @@ intfloat/multilingual-e5-small
 ```
 
 The model runs on CPU, has 384D embeddings, and supports Polish and English. All documents stay on
-your computer. The first run downloads the model into a persistent Docker volume.
+your computer. Postgres data is stored in the persistent Docker volume
+`tpo-agentic-automation-document-memory-rag_postgres_data`, and the first run downloads the model
+into `tpo-agentic-automation-document-memory-rag_huggingface_cache`.
 
 ### 2. Start
 
@@ -125,6 +127,18 @@ Run a full smoke test through a real MCP connection and the included example doc
 
 ```bash
 make smoke
+```
+
+Run your own MCP query from the console:
+
+```bash
+make query q='What did we decide about payment retries?'
+```
+
+Pass retrieval options with `args`:
+
+```bash
+make query q='What did we decide about payment retries?' args='--top-k-chunks 5 --no-full-documents'
 ```
 
 After the test, you can remove `knowledge/example-knowledge.md`; the scanner will automatically
@@ -483,6 +497,32 @@ Full reindex:
 docker compose exec product-memory product-memory reindex
 ```
 
+## Inspect Indexed Data
+
+Use the read-only debug endpoint to see what is stored in Postgres:
+
+```bash
+curl 'http://localhost:2600/debug/documents' | python -m json.tool
+```
+
+By default it returns all database documents, active and inactive, with chunk metadata and embedding
+summaries. Full document text and full embedding vectors are opt-in because they can make the JSON
+large:
+
+```bash
+curl 'http://localhost:2600/debug/documents?active_only=true&include_content=true&include_embeddings=true' \
+  | python -m json.tool
+```
+
+Useful query parameters:
+
+- `active_only=true` limits output to documents currently served by retrieval.
+- `project=checkout` filters by `metadata.project`.
+- `include_chunks=false` hides chunks.
+- `include_content=true` returns full document and chunk text instead of previews.
+- `include_embeddings=true` returns full embedding vectors instead of only dimensions, norm, and preview.
+- `limit=500&offset=0` paginates the document list.
+
 ## Backup and Reset
 
 Database backup:
@@ -498,14 +538,20 @@ Stop without deleting data:
 docker compose down
 ```
 
-Full database and model cache reset:
+Stop and remove containers without deleting data:
 
 ```bash
 make clean
 ```
 
-`make clean` removes Docker volumes. Files in `knowledge/` remain on disk and will be indexed again
-after startup.
+Full database and model cache reset:
+
+```bash
+make reset-data
+```
+
+`make reset-data` removes Docker volumes, including the Postgres database. Files in `knowledge/`
+remain on disk and will be indexed again after startup.
 
 ## Security
 

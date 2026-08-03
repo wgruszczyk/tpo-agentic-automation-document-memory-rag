@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 import typer
 from rich import print_json
@@ -9,6 +10,20 @@ from rich import print_json
 from product_memory.runtime import Runtime
 
 app = typer.Typer(no_args_is_help=True, help="Administration commands for Product Memory RAG.")
+
+
+def tool_result_payload(result: Any) -> Any:
+    if result.structured_content is not None:
+        return result.structured_content
+    for item in result.content or []:
+        text = getattr(item, "text", None)
+        if text is None:
+            continue
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"text": text}
+    return None
 
 
 def ready_runtime() -> Runtime:
@@ -60,9 +75,43 @@ def smoke_test(url: str = "http://127.0.0.1:2600/mcp") -> None:
             )
             return {
                 "tools": [tool.name for tool in tools.tools],
-                "status": status_result.structured_content,
-                "retrieval": retrieval_result.structured_content,
+                "status": tool_result_payload(status_result),
+                "retrieval": tool_result_payload(retrieval_result),
             }
+
+    print_json(json.dumps(asyncio.run(run()), default=str))
+
+
+@app.command("query")
+def query_mcp(
+    query: str = typer.Argument(..., help="Question to ask through retrieve_knowledge."),
+    url: str = typer.Option("http://127.0.0.1:2600/mcp", help="MCP Streamable HTTP endpoint."),
+    top_k_chunks: int = typer.Option(10, min=1, max=50, help="Maximum ranked chunks to return."),
+    top_k_documents: int = typer.Option(3, min=1, max=20, help="Maximum complete documents to return."),
+    project: str | None = typer.Option(None, help="Optional metadata.project filter."),
+    include_full_documents: bool = typer.Option(
+        True,
+        "--include-full-documents/--no-full-documents",
+        help="Include complete top document content in the response.",
+    ),
+    max_context_chars: int | None = typer.Option(None, min=2000, help="Optional context_pack character cap."),
+) -> None:
+    """Run retrieve_knowledge through the MCP server and print formatted JSON."""
+    from mcp import Client
+
+    async def run() -> dict:
+        payload = {
+            "query": query,
+            "top_k_chunks": top_k_chunks,
+            "top_k_documents": top_k_documents,
+            "project": project,
+            "include_full_documents": include_full_documents,
+            "max_context_chars": max_context_chars,
+        }
+        compact_payload = {key: value for key, value in payload.items() if value is not None}
+        async with Client(url) as client:
+            result = await client.call_tool("retrieve_knowledge", compact_payload)
+            return tool_result_payload(result)
 
     print_json(json.dumps(asyncio.run(run()), default=str))
 

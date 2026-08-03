@@ -4,7 +4,7 @@ COMPOSE_FILES += -f docker-compose.override.yml
 endif
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status ingest reindex smoke link-knowledge test clean
+.PHONY: start stop restart logs status ingest reindex smoke query link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -29,7 +29,11 @@ reindex:
 	$(COMPOSE) exec product-memory product-memory reindex
 
 smoke:
-	$(COMPOSE) exec product-memory product-memory smoke-test
+	$(COMPOSE) exec product-memory product-memory smoke-test --url http://127.0.0.1:8080/mcp
+
+query:
+	@test -n "$(q)" || (echo "Usage: make query q='What did we decide about payment retries?'" >&2; exit 2)
+	$(COMPOSE) exec product-memory product-memory query --url http://127.0.0.1:8080/mcp $(args) "$(q)"
 
 link-knowledge:
 	@test -f .env || cp .env.example .env
@@ -39,4 +43,7 @@ test:
 	python -m pytest
 
 clean:
+	$(COMPOSE) down --remove-orphans
+
+reset-data:
 	$(COMPOSE) down -v
