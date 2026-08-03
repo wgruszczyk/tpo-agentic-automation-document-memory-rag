@@ -35,8 +35,10 @@ class Settings(BaseSettings):
     recency_weight: float = Field(default=0.15, ge=0)
     recency_half_life_days: float = Field(default=180, gt=0)
 
+    min_relevance_score: float = Field(default=0.70, ge=0, le=1)
+    max_returned_documents: int = Field(default=25, ge=1, le=25)
     default_top_k_chunks: int = Field(default=10, ge=1, le=50)
-    default_top_k_documents: int = Field(default=3, ge=1, le=20)
+    default_top_k_documents: int = Field(default=7, ge=1, le=25)
     default_context_chars: int = Field(default=24000, ge=2000, le=250000)
     max_full_document_chars: int = Field(default=120000, ge=1000, le=2_000_000)
 

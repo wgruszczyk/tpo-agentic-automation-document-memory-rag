@@ -1,6 +1,16 @@
 from types import SimpleNamespace
 
-from product_memory.cli import tool_result_payload
+from typer.testing import CliRunner
+
+from product_memory.cli import app, tool_result_payload
+
+
+def test_query_cli_defaults_to_seven_documents() -> None:
+    result = CliRunner().invoke(app, ["query", "--help"])
+
+    assert result.exit_code == 0
+    assert "--top-k-documents" in result.output
+    assert "[default: 7]" in result.output
 
 
 def test_tool_result_payload_prefers_structured_content() -> None:

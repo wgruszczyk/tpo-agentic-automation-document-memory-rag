@@ -11,6 +11,13 @@ def test_default_supported_extensions_include_documents() -> None:
     assert {".txt", ".md", ".vtt", ".srt", ".pdf", ".docx"}.issubset(settings.extensions)
 
 
+def test_default_retrieval_limits_are_conservative() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.min_relevance_score == 0.70
+    assert settings.default_top_k_documents == 7
+    assert settings.max_returned_documents == 25
+
+
 def test_empty_optional_embedding_dimensions_is_none() -> None:
     settings = Settings(embedding_dimensions="")
     assert settings.embedding_dimensions is None

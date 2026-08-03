@@ -38,7 +38,7 @@ product-memory-backup.sql
 # Local knowledge documents
 /knowledge/**
 !/knowledge/
-!/knowledge/.README.md
+!/knowledge/.gitkeep
 !/knowledge/example-knowledge.md
 
 # Editor and OS files

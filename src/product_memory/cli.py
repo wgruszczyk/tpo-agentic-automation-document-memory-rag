@@ -87,7 +87,7 @@ def query_mcp(
     query: str = typer.Argument(..., help="Question to ask through retrieve_knowledge."),
     url: str = typer.Option("http://127.0.0.1:2600/mcp", help="MCP Streamable HTTP endpoint."),
     top_k_chunks: int = typer.Option(10, min=1, max=50, help="Maximum ranked chunks to return."),
-    top_k_documents: int = typer.Option(3, min=1, max=20, help="Maximum complete documents to return."),
+    top_k_documents: int = typer.Option(7, min=1, max=25, help="Maximum complete documents to return."),
     project: str | None = typer.Option(None, help="Optional metadata.project filter."),
     include_full_documents: bool = typer.Option(
         True,

@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from product_memory.embeddings.base import EmbeddingProvider
+from product_memory.models import ChunkResult
 from product_memory.retrieval.service import Retriever
 from product_memory.settings import Settings
 
@@ -98,6 +99,47 @@ def test_search_chunks_uses_stronger_lexical_signals() -> None:
     assert "position(q.raw_query in lower(coalesce(c.content, '')))" in sql
     assert "similarity(coalesce(d.title, ''), %(query)s)" in sql
     assert "word_similarity(%(query)s, coalesce(c.content, ''))" in sql
+    assert db.connection_instance.params["min_relevance_score"] == 0.70
+    assert "WHERE score >= %(min_relevance_score)s" in sql
+
+
+def test_retrieve_caps_requested_document_limit_to_configured_max() -> None:
+    retriever = CapturingRetriever(
+        settings=Settings(max_returned_documents=2, _env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+    )
+
+    retriever.retrieve("payment retries", top_k_documents=10)
+
+    assert retriever.document_limit == 2
+
+
+def test_retrieve_uses_default_document_limit() -> None:
+    retriever = CapturingRetriever(
+        settings=Settings(_env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+    )
+
+    retriever.retrieve("payment retries")
+
+    assert retriever.document_limit == 7
+
+
+def test_retrieve_allows_requested_document_limit_up_to_25() -> None:
+    retriever = CapturingRetriever(
+        settings=Settings(_env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+    )
+
+    retriever.retrieve("payment retries", top_k_documents=25)
+
+    assert retriever.document_limit == 25
 
 
 def test_schema_enables_trigram_search_indexes() -> None:
@@ -107,3 +149,26 @@ def test_schema_enables_trigram_search_indexes() -> None:
     assert "documents_title_trgm_idx" in schema
     assert "documents_source_path_trgm_idx" in schema
     assert "chunks_content_trgm_idx" in schema
+
+
+class CapturingRetriever(Retriever):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.document_limit: int | None = None
+
+    def _ready_profile(self) -> dict[str, Any]:
+        return {"status": "ready", "fingerprint": "profile"}
+
+    def _search_chunks(
+        self, query: str, profile_hash: str, limit: int, project: str | None
+    ) -> list[ChunkResult]:
+        return []
+
+    def _documents_for_chunks(self, chunks: list[ChunkResult], limit: int, include_content: bool):
+        self.document_limit = limit
+        return []
+
+
+class FakeCompressor:
+    def pack(self, chunks: list[ChunkResult], max_chars: int) -> str:
+        return ""

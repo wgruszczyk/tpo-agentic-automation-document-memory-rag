@@ -18,8 +18,8 @@ def _write(path: Path, content: str = "content") -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def test_example_knowledge_is_used_when_it_is_the_only_document(tmp_path: Path) -> None:
-    _write(tmp_path / ".README.md")
+def test_example_knowledge_is_used_when_only_placeholder_exists(tmp_path: Path) -> None:
+    _write(tmp_path / ".gitkeep")
     _write(tmp_path / "example-knowledge.md")
 
     assert _relative_paths(_service(tmp_path), tmp_path) == ["example-knowledge.md"]

@@ -47,7 +47,11 @@ class Retriever:
             raise ValueError("query cannot be empty")
         profile = self._ready_profile()
         chunk_limit = min(max(top_k_chunks or self.settings.default_top_k_chunks, 1), 50)
-        document_limit = min(max(top_k_documents or self.settings.default_top_k_documents, 1), 20)
+        document_limit = min(
+            max(top_k_documents or self.settings.default_top_k_documents, 1),
+            self.settings.max_returned_documents,
+            25,
+        )
         context_limit = min(
             max(max_context_chars or self.settings.default_context_chars, 2000),
             250000,
@@ -221,6 +225,7 @@ class Retriever:
             "lexical_weight": self.settings.lexical_weight,
             "recency_weight": self.settings.recency_weight,
             "half_life": self.settings.recency_half_life_days,
+            "min_relevance_score": self.settings.min_relevance_score,
             "project": project,
         }
         project_clause = "AND (%(project)s::text IS NULL OR d.metadata->>'project' = %(project)s::text)"
@@ -289,12 +294,17 @@ class Retriever:
                 WHERE d.is_active = TRUE
                   AND c.embedding_profile_hash = %(profile_hash)s
                   {project_clause}
+            ),
+            ranked AS (
+                SELECT *,
+                    (%(semantic_weight)s * semantic_score) +
+                    (%(lexical_weight)s * lexical_score) +
+                    (%(recency_weight)s * recency_score) AS score
+                FROM scored
             )
-            SELECT *,
-                (%(semantic_weight)s * semantic_score) +
-                (%(lexical_weight)s * lexical_score) +
-                (%(recency_weight)s * recency_score) AS score
-            FROM scored
+            SELECT *
+            FROM ranked
+            WHERE score >= %(min_relevance_score)s
             ORDER BY score DESC, effective_at DESC
             LIMIT %(limit)s
         """
