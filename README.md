@@ -195,6 +195,11 @@ removes it from the active index, but the document record remains in the databas
 `knowledge/.README.md` and `knowledge/README.md` are never indexed, and they do not count as real
 knowledge documents when deciding whether to ignore `knowledge/example-knowledge.md`.
 
+During each scan, parsed documents are deduplicated by checksum before indexing. If the same content
+appears through multiple paths or linked folders, only one canonical document is active. The kept
+document records `duplicate_source_paths`, `duplicate_count`, and `all_source_paths` in metadata, so
+the duplicate channels remain visible through `/debug/documents`.
+
 Force a scan manually:
 
 ```bash

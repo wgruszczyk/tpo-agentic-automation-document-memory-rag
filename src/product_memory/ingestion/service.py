@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -128,24 +129,27 @@ class IngestionService:
         root = self.settings.knowledge_dir
         root.mkdir(parents=True, exist_ok=True)
         paths = self._discover_paths(root)
-        found_paths: set[str] = set()
+        parsed_documents: list[ParsedDocument] = []
         added = updated = unchanged = failed = 0
 
         for path in paths:
-            relative_path = self._relative_source_path(root, path)
-            found_paths.add(relative_path)
             try:
-                parsed = self.parser.parse(path)
-                outcome = self._upsert_document(parsed, profile["fingerprint"])
-                if outcome == "added":
-                    added += 1
-                elif outcome == "updated":
-                    updated += 1
-                else:
-                    unchanged += 1
+                parsed_documents.append(self.parser.parse(path))
             except Exception:
                 failed += 1
                 LOGGER.exception("Failed to ingest %s", path)
+
+        unique_documents, duplicates = self._deduplicate_documents(parsed_documents)
+        found_paths = {parsed.source_path for parsed in unique_documents}
+
+        for parsed in unique_documents:
+            outcome = self._upsert_document(parsed, profile["fingerprint"])
+            if outcome == "added":
+                added += 1
+            elif outcome == "updated":
+                updated += 1
+            else:
+                unchanged += 1
 
         removed = self._deactivate_missing(found_paths)
         result = {
@@ -154,10 +158,40 @@ class IngestionService:
             "unchanged": unchanged,
             "removed": removed,
             "failed": failed,
+            "duplicates": duplicates,
         }
-        if added or updated or removed or failed:
+        if added or updated or removed or failed or duplicates:
             LOGGER.info("Ingestion scan: %s", result)
         return result
+
+    @staticmethod
+    def _deduplicate_documents(parsed_documents: list[ParsedDocument]) -> tuple[list[ParsedDocument], int]:
+        canonical_by_hash: dict[str, ParsedDocument] = {}
+        duplicates_by_hash: dict[str, list[str]] = {}
+
+        for parsed in sorted(parsed_documents, key=lambda document: document.source_path):
+            canonical = canonical_by_hash.get(parsed.content_hash)
+            if canonical:
+                duplicates_by_hash.setdefault(parsed.content_hash, []).append(parsed.source_path)
+                continue
+            canonical_by_hash[parsed.content_hash] = parsed
+
+        unique_documents: list[ParsedDocument] = []
+        duplicate_count = 0
+        for parsed in canonical_by_hash.values():
+            duplicate_paths = duplicates_by_hash.get(parsed.content_hash, [])
+            duplicate_count += len(duplicate_paths)
+            if not duplicate_paths:
+                unique_documents.append(parsed)
+                continue
+
+            metadata = dict(parsed.metadata)
+            metadata["duplicate_source_paths"] = duplicate_paths
+            metadata["duplicate_count"] = len(duplicate_paths)
+            metadata["all_source_paths"] = [parsed.source_path, *duplicate_paths]
+            unique_documents.append(replace(parsed, metadata=metadata))
+
+        return unique_documents, duplicate_count
 
     def _discover_paths(self, root: Path) -> list[Path]:
         paths = sorted(

@@ -1,7 +1,9 @@
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from product_memory.ingestion.chunker import TextChunk
+from product_memory.ingestion.parser import ParsedDocument
 from product_memory.ingestion.service import IngestionService
 from product_memory.settings import Settings
 
@@ -73,3 +75,40 @@ def test_index_document_uses_cursor_executemany() -> None:
     assert indexed == 2
     assert len(db.connection_instance.cursor_instance.inserted_rows) == 2
     assert db.connection_instance.committed
+
+
+def test_deduplicate_documents_keeps_one_document_per_checksum() -> None:
+    primary = parsed_document("a/source.md", "same")
+    duplicate = parsed_document("b/source-copy.md", "same")
+    unique = parsed_document("c/other.md", "different")
+
+    documents, duplicates = IngestionService._deduplicate_documents([duplicate, unique, primary])  # noqa: SLF001
+
+    assert duplicates == 1
+    assert [document.source_path for document in documents] == ["a/source.md", "c/other.md"]
+    assert documents[0].metadata["duplicate_source_paths"] == ["b/source-copy.md"]
+    assert documents[0].metadata["duplicate_count"] == 1
+    assert documents[0].metadata["all_source_paths"] == ["a/source.md", "b/source-copy.md"]
+
+
+def test_deduplicate_documents_does_not_add_duplicate_metadata_for_unique_documents() -> None:
+    document = parsed_document("source.md", "content")
+
+    documents, duplicates = IngestionService._deduplicate_documents([document])  # noqa: SLF001
+
+    assert duplicates == 0
+    assert documents == [document]
+    assert "duplicate_source_paths" not in documents[0].metadata
+
+
+def parsed_document(source_path: str, content: str) -> ParsedDocument:
+    now = datetime(2026, 8, 4, tzinfo=UTC)
+    return ParsedDocument(
+        source_path=source_path,
+        title=source_path,
+        content=content,
+        content_hash=f"hash-{content}",
+        source_modified_at=now,
+        effective_at=now,
+        metadata={"title": source_path, "extension": ".md"},
+    )
