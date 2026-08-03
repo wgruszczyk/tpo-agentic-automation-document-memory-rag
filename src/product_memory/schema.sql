@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS system_state (
     key TEXT PRIMARY KEY,
@@ -25,6 +26,8 @@ CREATE INDEX IF NOT EXISTS documents_active_idx ON documents (is_active);
 CREATE INDEX IF NOT EXISTS documents_effective_at_idx ON documents (effective_at DESC);
 CREATE INDEX IF NOT EXISTS documents_content_hash_idx ON documents (content_hash);
 CREATE INDEX IF NOT EXISTS documents_metadata_idx ON documents USING gin (metadata);
+CREATE INDEX IF NOT EXISTS documents_title_trgm_idx ON documents USING gin (title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS documents_source_path_trgm_idx ON documents USING gin (source_path gin_trgm_ops);
 
 CREATE TABLE IF NOT EXISTS chunks (
     id UUID PRIMARY KEY,
@@ -44,3 +47,4 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS chunks_document_idx ON chunks (document_id, chunk_index);
 CREATE INDEX IF NOT EXISTS chunks_profile_idx ON chunks (embedding_profile_hash);
 CREATE INDEX IF NOT EXISTS chunks_search_idx ON chunks USING gin (search_vector);
+CREATE INDEX IF NOT EXISTS chunks_content_trgm_idx ON chunks USING gin (content gin_trgm_ops);

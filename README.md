@@ -253,8 +253,12 @@ RECENCY_HALF_LIFE_DAYS=180
 The final score combines:
 
 ```text
-semantic similarity + full-text search + recency boost
+semantic similarity + lexical relevance + recency boost
 ```
+
+Lexical relevance uses PostgreSQL search locally: `websearch_to_tsquery`, weighted full-text fields
+(`title`, `source_path`, metadata, and chunk content), exact phrase boosts, and `pg_trgm` similarity
+for partial, typo-tolerant, and acronym-like matches.
 
 A newer document does not automatically outrank a highly relevant older document, but it receives a
 controlled advantage. The agent receives both dates and is instructed to report conflicts.

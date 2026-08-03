@@ -225,7 +225,12 @@ class Retriever:
         }
         project_clause = "AND (%(project)s::text IS NULL OR d.metadata->>'project' = %(project)s::text)"
         sql = f"""
-            WITH scored AS (
+            WITH query_input AS (
+                SELECT
+                    websearch_to_tsquery('simple', %(query)s) AS text_query,
+                    lower(%(query)s) AS raw_query
+            ),
+            scored AS (
                 SELECT
                     c.id,
                     c.document_id,
@@ -238,8 +243,40 @@ class Retriever:
                     d.effective_at,
                     d.metadata,
                     GREATEST(0.0, 1.0 - (c.embedding <=> %(embedding)s)) AS semantic_score,
-                    LEAST(1.0, ts_rank_cd(c.search_vector, plainto_tsquery('simple', %(query)s)) * 4.0)
-                        AS lexical_score,
+                    LEAST(
+                        1.0,
+                        (
+                            ts_rank_cd(
+                                setweight(to_tsvector('simple', coalesce(d.title, '')), 'A') ||
+                                setweight(to_tsvector('simple', coalesce(d.source_path, '')), 'B') ||
+                                setweight(to_tsvector('simple', coalesce(d.metadata::text, '')), 'B') ||
+                                setweight(c.search_vector, 'C'),
+                                q.text_query,
+                                32
+                            ) * 6.0
+                        ) +
+                        LEAST(
+                            1.0,
+                            (CASE WHEN position(q.raw_query in lower(coalesce(d.title, ''))) > 0
+                                THEN 0.45 ELSE 0.0 END) +
+                            (CASE WHEN position(q.raw_query in lower(coalesce(d.source_path, ''))) > 0
+                                THEN 0.35 ELSE 0.0 END) +
+                            (CASE WHEN position(q.raw_query in lower(coalesce(d.metadata::text, ''))) > 0
+                                THEN 0.30 ELSE 0.0 END) +
+                            (CASE WHEN position(q.raw_query in lower(coalesce(c.content, ''))) > 0
+                                THEN 0.55 ELSE 0.0 END)
+                        ) +
+                        (
+                            GREATEST(
+                                similarity(coalesce(d.title, ''), %(query)s),
+                                similarity(coalesce(d.source_path, ''), %(query)s),
+                                word_similarity(%(query)s, coalesce(d.title, '')),
+                                word_similarity(%(query)s, coalesce(d.source_path, '')),
+                                word_similarity(%(query)s, coalesce(d.metadata::text, '')) * 0.75,
+                                word_similarity(%(query)s, coalesce(c.content, '')) * 0.65
+                            ) * 0.45
+                        )
+                    ) AS lexical_score,
                     exp(
                         -ln(2.0) * GREATEST(
                             0.0,
@@ -248,6 +285,7 @@ class Retriever:
                     ) AS recency_score
                 FROM chunks c
                 JOIN documents d ON d.id = c.document_id
+                CROSS JOIN query_input q
                 WHERE d.is_active = TRUE
                   AND c.embedding_profile_hash = %(profile_hash)s
                   {project_clause}
