@@ -1,7 +1,10 @@
+PYTHON ?= python3
+
 COMPOSE_FILES := -f docker-compose.yml
 ifneq ($(wildcard docker-compose.override.yml),)
 COMPOSE_FILES += -f docker-compose.override.yml
 endif
+
 COMPOSE := docker compose $(COMPOSE_FILES)
 
 .PHONY: start stop restart logs status ingest reindex smoke query link-knowledge test clean reset-data
@@ -37,10 +40,10 @@ query:
 
 link-knowledge:
 	@test -f .env || cp .env.example .env
-	python scripts/link_knowledge.py
+	$(PYTHON) scripts/link_knowledge.py
 
 test:
-	python -m pytest
+	$(PYTHON) -m pytest
 
 clean:
 	$(COMPOSE) down --remove-orphans

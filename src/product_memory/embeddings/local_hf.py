@@ -73,7 +73,10 @@ class LocalHFEmbeddingProvider(EmbeddingProvider):
 
     def profile(self) -> dict[str, Any]:
         model = self._load_model()
-        dimension = int(model.get_sentence_embedding_dimension())
+        get_dimension = getattr(model, "get_embedding_dimension", None)
+        if get_dimension is None:
+            get_dimension = model.get_sentence_embedding_dimension
+        dimension = int(get_dimension())
         resolved_revision = self.settings.embedding_revision
         if not resolved_revision:
             try:
