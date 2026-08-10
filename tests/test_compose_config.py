@@ -15,6 +15,14 @@ def test_postgres_uses_stable_persistent_volume() -> None:
     )
 
 
+def test_container_healthcheck_survives_a_rebuild() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+
+    probe = " ".join(compose["services"]["product-memory"]["healthcheck"]["test"])
+
+    assert "/health/live" in probe
+
+
 def test_clean_preserves_volumes_and_reset_data_is_explicit() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 

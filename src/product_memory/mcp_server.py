@@ -133,6 +133,12 @@ async def health(request: Request) -> Response:
         return JSONResponse({"status": "starting", "detail": str(exc)}, status_code=503)
 
 
+@mcp.custom_route("/health/live", methods=["GET"])
+async def health_live(request: Request) -> Response:
+    # Liveness only. A rebuild empties the index on purpose, so readiness must not restart the server.
+    return JSONResponse({"status": "alive", "version": __version__})
+
+
 @mcp.custom_route("/debug/documents", methods=["GET"])
 async def debug_documents(request: Request) -> Response:
     try:

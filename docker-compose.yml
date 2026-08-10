@@ -47,7 +47,7 @@ services:
         - -c
         - >-
           import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)
+          urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=3)
       interval: 10s
       timeout: 5s
       retries: 12
