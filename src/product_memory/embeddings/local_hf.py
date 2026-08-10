@@ -27,6 +27,10 @@ class LocalHFEmbeddingProvider(EmbeddingProvider):
                 from sentence_transformers import SentenceTransformer
 
                 torch.set_num_threads(self.settings.local_embedding_threads)
+                if self._is_model_cached():
+                    # Model already downloaded: skip Hub freshness checks so restarts stay fully offline.
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
                 kwargs: dict[str, Any] = {
                     "device": "cpu",
                     "cache_folder": str(self.settings.hf_home),
@@ -35,6 +39,11 @@ class LocalHFEmbeddingProvider(EmbeddingProvider):
                     kwargs["revision"] = self.settings.embedding_revision
                 self._model = SentenceTransformer(self.settings.embedding_model, **kwargs)
         return self._model
+
+    def _is_model_cached(self) -> bool:
+        cache_dir_name = "models--" + self.settings.embedding_model.replace("/", "--")
+        snapshots_dir = self.settings.hf_home / cache_dir_name / "snapshots"
+        return snapshots_dir.is_dir() and any(snapshots_dir.iterdir())
 
     @property
     def uses_e5_prefixes(self) -> bool:

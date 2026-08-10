@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://product_memory:product_memory_local_only@db:5432/product_memory"
     knowledge_dir: Path = Path("/knowledge")
     scan_interval_seconds: float = 30.0
-    supported_extensions: str = ".txt,.md,.markdown,.rst,.log,.vtt,.srt,.pdf,.docx"
+    supported_extensions: str = ".txt,.md,.markdown,.rst,.log,.vtt,.srt,.pdf,.docx,.pptx"
 
     chunk_size: int = Field(default=1800, ge=300)
     chunk_overlap: int = Field(default=250, ge=0)

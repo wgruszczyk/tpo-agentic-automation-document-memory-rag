@@ -8,7 +8,9 @@ def test_default_scan_interval_is_30_seconds() -> None:
 
 def test_default_supported_extensions_include_documents() -> None:
     settings = Settings(_env_file=None)
-    assert {".txt", ".md", ".vtt", ".srt", ".pdf", ".docx"}.issubset(settings.extensions)
+    assert {".txt", ".md", ".vtt", ".srt", ".pdf", ".docx", ".pptx"}.issubset(
+        settings.extensions
+    )
 
 
 def test_default_retrieval_limits_are_conservative() -> None:

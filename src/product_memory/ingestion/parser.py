@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 from dateutil import parser as date_parser
 
-from product_memory.ingestion.extractors import extract_document
+from product_memory.ingestion.extractors import extract_document, strip_null_bytes
 from product_memory.ingestion.metadata import infer_document_metadata
 from product_memory.settings import Settings
 
@@ -43,6 +43,7 @@ class DocumentParser:
             raise ValueError(f"Document is empty: {path}")
 
         metadata = {**extracted.metadata, **infer_document_metadata(path, content), **frontmatter}
+        metadata = strip_null_bytes(metadata)
         stat = path.stat()
         modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
         effective_at = self._effective_date(path, metadata, modified_at)

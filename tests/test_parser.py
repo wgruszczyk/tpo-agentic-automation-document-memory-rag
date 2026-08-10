@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from docx import Document as DocxDocument
+from pptx import Presentation
+from pptx.util import Inches
 
 from product_memory.ingestion.parser import DocumentParser
 from product_memory.settings import Settings
@@ -158,6 +160,34 @@ def test_extracts_pdf_content_and_properties(tmp_path: Path) -> None:
     assert parsed.metadata["source_format"] == "pdf"
     assert parsed.metadata["page_count"] == 1
     assert parsed.metadata["extension"] == ".pdf"
+
+
+def test_extracts_pptx_content_notes_tables_and_properties(tmp_path: Path) -> None:
+    path = tmp_path / "checkout-roadmap.pptx"
+    presentation = Presentation()
+    presentation.core_properties.title = "Checkout Roadmap"
+    presentation.core_properties.author = "Product Team"
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Checkout Roadmap"
+    slide.shapes.add_textbox(Inches(1), Inches(2), Inches(5), Inches(1)).text = (
+        "Saved cards launch in Q4."
+    )
+    table = slide.shapes.add_table(1, 2, Inches(1), Inches(3), Inches(5), Inches(1)).table
+    table.cell(0, 0).text = "Priority"
+    table.cell(0, 1).text = "High"
+    slide.notes_slide.notes_text_frame.text = "Confirm launch date with engineering."
+    presentation.save(path)
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert parsed.title == "Checkout Roadmap"
+    assert "Saved cards launch in Q4." in parsed.content
+    assert "Priority | High" in parsed.content
+    assert "Confirm launch date with engineering." in parsed.content
+    assert parsed.metadata["author"] == "Product Team"
+    assert parsed.metadata["source_format"] == "pptx"
+    assert parsed.metadata["slide_count"] == 1
+    assert parsed.metadata["extension"] == ".pptx"
 
 
 def _write_simple_pdf(path: Path, title: str, body: str) -> None:
