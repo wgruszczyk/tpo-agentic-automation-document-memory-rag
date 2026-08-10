@@ -4,6 +4,7 @@ import logging
 
 from product_memory.db import Database
 from product_memory.embeddings.factory import create_embedding_provider
+from product_memory.ingestion.cache import ExtractionCache
 from product_memory.ingestion.chunker import DocumentChunker
 from product_memory.ingestion.parser import DocumentParser
 from product_memory.ingestion.service import IngestionService
@@ -17,7 +18,7 @@ class Runtime:
         self.settings = settings or get_settings()
         self.db = Database(self.settings)
         self.provider = create_embedding_provider(self.settings)
-        self.parser = DocumentParser(self.settings)
+        self.parser = DocumentParser(self.settings, ExtractionCache(self.db))
         self.chunker = DocumentChunker(self.settings)
         self.ingestion = IngestionService(
             self.settings, self.db, self.provider, self.parser, self.chunker

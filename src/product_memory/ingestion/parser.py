@@ -11,7 +11,8 @@ from typing import Any
 import yaml
 from dateutil import parser as date_parser
 
-from product_memory.ingestion.extractors import extract_document, strip_null_bytes
+from product_memory.ingestion.cache import ExtractionCache, file_signature
+from product_memory.ingestion.extractors import ExtractedDocument, extract_document, strip_null_bytes
 from product_memory.ingestion.metadata import infer_document_metadata
 from product_memory.ingestion.ocr import OcrEngine
 from product_memory.settings import Settings
@@ -37,14 +38,18 @@ class EmptyDocumentError(ValueError):
 
 
 class DocumentParser:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, cache: ExtractionCache | None = None):
         self.settings = settings
         self.ocr = OcrEngine(settings)
+        self.cache = cache
 
-    def parse(self, path: Path) -> ParsedDocument:
-        extracted = extract_document(path, self.ocr)
+    def parse(self, path: Path, force: bool = False) -> ParsedDocument:
+        extracted = self._extract(path, force=force)
         frontmatter, content = self._extract_frontmatter(extracted.content)
         content = content.strip()
+        if not content and frontmatter:
+            # A note that is nothing but front matter still carries its text in the field values.
+            content = self._render_frontmatter(frontmatter)
         if not content:
             raise EmptyDocumentError(f"Document has no extractable text: {path}")
 
@@ -74,6 +79,19 @@ class DocumentParser:
             metadata=normalized_metadata,
         )
 
+    def _extract(self, path: Path, force: bool = False) -> ExtractedDocument:
+        if self.cache is None:
+            return extract_document(path, self.ocr)
+        signature = file_signature(path)
+        relative_path = path.absolute().relative_to(self.settings.knowledge_dir.absolute()).as_posix()
+        if not force:
+            cached = self.cache.get(relative_path, signature)
+            if cached is not None:
+                return cached
+        extracted = extract_document(path, self.ocr)
+        self.cache.set(relative_path, signature, extracted)
+        return extracted
+
     @staticmethod
     def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         match = _FRONTMATTER.match(text)
@@ -83,6 +101,17 @@ class DocumentParser:
         if not isinstance(loaded, dict):
             raise ValueError("YAML front matter must be a mapping")
         return loaded, text[match.end() :]
+
+    @staticmethod
+    def _render_frontmatter(frontmatter: dict[str, Any]) -> str:
+        lines = []
+        for key, value in frontmatter.items():
+            if value is None or value == "":
+                continue
+            if isinstance(value, list | tuple):
+                value = ", ".join(str(item) for item in value)
+            lines.append(f"{key}: {value}")
+        return "\n".join(lines).strip()
 
     @staticmethod
     def _title(path: Path, metadata: dict[str, Any], content: str) -> str:

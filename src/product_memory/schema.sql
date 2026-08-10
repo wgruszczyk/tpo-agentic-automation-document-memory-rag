@@ -29,6 +29,15 @@ CREATE INDEX IF NOT EXISTS documents_metadata_idx ON documents USING gin (metada
 CREATE INDEX IF NOT EXISTS documents_title_trgm_idx ON documents USING gin (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS documents_source_path_trgm_idx ON documents USING gin (source_path gin_trgm_ops);
 
+-- Extractor output for a file signature, so an unchanged file is never OCR'd twice.
+CREATE TABLE IF NOT EXISTS extraction_cache (
+    source_path TEXT PRIMARY KEY,
+    signature TEXT NOT NULL,
+    content TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS chunks (
     id UUID PRIMARY KEY,
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

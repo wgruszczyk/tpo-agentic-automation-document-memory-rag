@@ -49,8 +49,17 @@ def ingest_once() -> None:
 
 @app.command("reindex")
 def reindex() -> None:
+    """Rebuild embeddings from the content already stored in the database."""
     runtime = ready_runtime()
     result = runtime.ingestion.reindex_all()
+    print_json(json.dumps(result))
+
+
+@app.command("rebuild")
+def rebuild() -> None:
+    """Re-read every file from disk, then rebuild content, metadata, and embeddings."""
+    runtime = ready_runtime()
+    result = runtime.ingestion.rebuild_all()
     print_json(json.dumps(result))
 
 

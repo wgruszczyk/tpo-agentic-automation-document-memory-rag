@@ -35,6 +35,20 @@ def test_date_from_filename(tmp_path: Path) -> None:
     assert parsed.effective_at.date().isoformat() == "2026-06-15"
 
 
+def test_keeps_text_from_a_note_that_is_only_front_matter(tmp_path: Path) -> None:
+    path = tmp_path / "digest.txt"
+    path.write_text(
+        "---\nWho: Kerstin\nMessage: In TR there are only two brands\n---\n",
+        encoding="utf-8",
+    )
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert "In TR there are only two brands" in parsed.content
+    assert "Who: Kerstin" in parsed.content
+    assert parsed.metadata["Message"] == "In TR there are only two brands"
+
+
 def test_infers_reliable_metadata_from_teams_webvtt(tmp_path: Path) -> None:
     path = tmp_path / "teams-checkout-refinement.vtt"
     path.write_text(
@@ -278,6 +292,53 @@ def test_extracts_text_from_a_scanned_image(tmp_path: Path) -> None:
     assert parsed.metadata["image_height"] == 120
     assert parsed.metadata["ocr_applied"] is True
     assert stub.calls == 1
+
+
+class _MemoryCache:
+    def __init__(self) -> None:
+        self.entries: dict[str, tuple[str, object]] = {}
+
+    def get(self, source_path: str, signature: str):
+        entry = self.entries.get(source_path)
+        return entry[1] if entry and entry[0] == signature else None
+
+    def set(self, source_path: str, signature: str, extracted) -> None:
+        self.entries[source_path] = (signature, extracted)
+
+
+def test_unchanged_files_are_not_ocred_again(tmp_path: Path) -> None:
+    path = _write_png(tmp_path / "scan.png")
+    parser, stub = _parser_with_ocr(tmp_path, "Invoice 2026/03")
+    parser.cache = _MemoryCache()
+
+    first = parser.parse(path)
+    second = parser.parse(path)
+
+    assert stub.calls == 1
+    assert first.content == second.content
+
+
+def test_rebuild_forces_extraction_to_run_again(tmp_path: Path) -> None:
+    path = _write_png(tmp_path / "scan.png")
+    parser, stub = _parser_with_ocr(tmp_path, "Invoice 2026/03")
+    parser.cache = _MemoryCache()
+
+    parser.parse(path)
+    parser.parse(path, force=True)
+
+    assert stub.calls == 2
+
+
+def test_edited_files_are_extracted_again(tmp_path: Path) -> None:
+    path = _write_png(tmp_path / "scan.png")
+    parser, stub = _parser_with_ocr(tmp_path, "Invoice 2026/03")
+    parser.cache = _MemoryCache()
+
+    parser.parse(path)
+    _write_png(path, size=(300, 150))
+    parser.parse(path)
+
+    assert stub.calls == 2
 
 
 def test_image_without_readable_text_is_skipped(tmp_path: Path) -> None:

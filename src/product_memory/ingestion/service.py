@@ -125,7 +125,14 @@ class IngestionService:
         with self.db.advisory_lock(INDEX_LOCK):
             return self._scan_once_locked(profile)
 
-    def _scan_once_locked(self, profile: dict[str, Any]) -> dict[str, int]:
+    def rebuild_all(self) -> dict[str, int]:
+        # reindex_all only re-embeds stored content, so extraction changes such as new OCR
+        # output need every file read from disk again.
+        profile = self.ensure_index_profile()
+        with self.db.advisory_lock(INDEX_LOCK):
+            return self._scan_once_locked(profile, force=True)
+
+    def _scan_once_locked(self, profile: dict[str, Any], force: bool = False) -> dict[str, int]:
         root = self.settings.knowledge_dir
         root.mkdir(parents=True, exist_ok=True)
         paths = self._discover_paths(root)
@@ -134,7 +141,7 @@ class IngestionService:
 
         for path in paths:
             try:
-                parsed_documents.append(self.parser.parse(path))
+                parsed_documents.append(self.parser.parse(path, force=force))
             except EmptyDocumentError as error:
                 skipped += 1
                 LOGGER.info("Skipping %s", error)
@@ -146,7 +153,7 @@ class IngestionService:
         found_paths = {parsed.source_path for parsed in unique_documents}
 
         for parsed in unique_documents:
-            outcome = self._upsert_document(parsed, profile["fingerprint"])
+            outcome = self._upsert_document(parsed, profile["fingerprint"], force=force)
             if outcome == "added":
                 added += 1
             elif outcome == "updated":
@@ -249,7 +256,7 @@ class IngestionService:
     def _relative_source_path(root: Path, path: Path) -> str:
         return path.absolute().relative_to(root.absolute()).as_posix()
 
-    def _upsert_document(self, parsed: ParsedDocument, profile_hash: str) -> str:
+    def _upsert_document(self, parsed: ParsedDocument, profile_hash: str, force: bool = False) -> str:
         with self.db.connection() as conn:
             existing = conn.execute(
                 """
@@ -259,7 +266,8 @@ class IngestionService:
                 (parsed.source_path,),
             ).fetchone()
             if (
-                existing
+                not force
+                and existing
                 and existing["title"] == parsed.title
                 and existing["content_hash"] == parsed.content_hash
                 and existing["effective_at"] == parsed.effective_at

@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status ingest reindex smoke query link-knowledge test clean reset-data
+.PHONY: start stop restart logs status ingest reindex rebuild smoke query link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -28,8 +28,13 @@ status:
 ingest:
 	$(COMPOSE) exec product-memory product-memory ingest-once
 
+# Rebuilds embeddings from stored content.
 reindex:
 	$(COMPOSE) exec product-memory product-memory reindex
+
+# Re-reads every file from disk. Use after an extraction change, such as new OCR support.
+rebuild:
+	$(COMPOSE) exec product-memory product-memory rebuild
 
 smoke:
 	$(COMPOSE) exec product-memory product-memory smoke-test --url http://127.0.0.1:8080/mcp

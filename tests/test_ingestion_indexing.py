@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 from product_memory.ingestion.chunker import TextChunk
@@ -112,3 +113,60 @@ def parsed_document(source_path: str, content: str) -> ParsedDocument:
         effective_at=now,
         metadata={"title": source_path, "extension": ".md"},
     )
+
+
+class UpsertConnection(FakeConnection):
+    def __init__(self, existing: dict) -> None:
+        super().__init__()
+        self.existing = existing
+
+    def execute(self, sql: str, params: tuple | None = None):  # type: ignore[override]
+        super().execute(sql, params)
+        return SimpleNamespace(fetchone=lambda: self.existing)
+
+
+class UpsertDatabase(FakeDatabase):
+    def __init__(self, existing: dict) -> None:
+        super().__init__()
+        self.connection_instance = UpsertConnection(existing)
+
+
+def upsert_service(existing: dict) -> tuple[IngestionService, list]:
+    service = IngestionService(
+        Settings(_env_file=None),
+        db=UpsertDatabase(existing),  # type: ignore[arg-type]
+        provider=FakeProvider(),  # type: ignore[arg-type]
+        parser=None,  # type: ignore[arg-type]
+        chunker=FakeChunker(),  # type: ignore[arg-type]
+    )
+    indexed: list = []
+    service._index_document = lambda *args: indexed.append(args) or 0  # type: ignore[assignment] # noqa: SLF001
+    return service, indexed
+
+
+def stored_row(parsed: ParsedDocument, profile_hash: str) -> dict:
+    return {
+        "id": uuid4(),
+        "title": parsed.title,
+        "content_hash": parsed.content_hash,
+        "effective_at": parsed.effective_at,
+        "metadata": parsed.metadata,
+        "indexed_profile_hash": profile_hash,
+        "is_active": True,
+    }
+
+
+def test_upsert_document_leaves_untouched_sources_alone() -> None:
+    parsed = parsed_document("source.md", "content")
+    service, indexed = upsert_service(stored_row(parsed, "profile"))
+
+    assert service._upsert_document(parsed, "profile") == "unchanged"  # noqa: SLF001
+    assert indexed == []
+
+
+def test_upsert_document_force_reruns_extraction_output_that_looks_unchanged() -> None:
+    parsed = parsed_document("source.md", "content")
+    service, indexed = upsert_service(stored_row(parsed, "profile"))
+
+    assert service._upsert_document(parsed, "profile", force=True) == "updated"  # noqa: SLF001
+    assert len(indexed) == 1
