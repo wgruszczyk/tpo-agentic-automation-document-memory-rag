@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import extract_msg
 from docx import Document as DocxDocument
 from pptx import Presentation
 from pptx.util import Inches
@@ -188,6 +189,45 @@ def test_extracts_pptx_content_notes_tables_and_properties(tmp_path: Path) -> No
     assert parsed.metadata["source_format"] == "pptx"
     assert parsed.metadata["slide_count"] == 1
     assert parsed.metadata["extension"] == ".pptx"
+
+
+class _FakeAttachment:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeMsgMessage:
+    def __init__(self) -> None:
+        self.subject = "Renewal terms for Acme"
+        self.sender = "alice@example.com"
+        self.to = "bob@example.com"
+        self.cc = None
+        self.date = datetime(2026, 3, 4, 12, 30, tzinfo=UTC)
+        self.body = "We agreed to net-30 payment terms.\n"
+        self.attachments = [_FakeAttachment("contract.pdf")]
+
+    def __enter__(self) -> "_FakeMsgMessage":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+def test_extracts_msg_content_and_properties(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "renewal.msg"
+    path.write_bytes(b"")
+    monkeypatch.setattr(extract_msg, "openMsg", lambda *_args, **_kwargs: _FakeMsgMessage())
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert parsed.title == "Renewal terms for Acme"
+    assert "net-30 payment terms" in parsed.content
+    assert parsed.metadata["source_format"] == "msg"
+    assert parsed.metadata["sender"] == "alice@example.com"
+    assert parsed.metadata["to"] == "bob@example.com"
+    assert parsed.metadata["attachment_names"] == ["contract.pdf"]
+    assert parsed.metadata["extension"] == ".msg"
+    assert parsed.effective_at == datetime(2026, 3, 4, 12, 30, tzinfo=UTC)
 
 
 def _write_simple_pdf(path: Path, title: str, body: str) -> None:

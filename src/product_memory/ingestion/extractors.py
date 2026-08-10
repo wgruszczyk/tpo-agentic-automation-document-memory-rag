@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import extract_msg
 from docx import Document as DocxDocument
 from pptx import Presentation
 from pypdf import PdfReader
@@ -29,6 +30,8 @@ def extract_document(path: Path) -> ExtractedDocument:
         extracted = _extract_docx(path)
     elif suffix == ".pptx":
         extracted = _extract_pptx(path)
+    elif suffix == ".msg":
+        extracted = _extract_msg(path)
     else:
         extracted = ExtractedDocument(content=_read_text(path), metadata={})
     return _sanitize_extracted(extracted)
@@ -154,6 +157,28 @@ def _extract_pptx(path: Path) -> ExtractedDocument:
         metadata["modified_at"] = _isoformat(props.modified)
 
     return ExtractedDocument(content="\n\n".join(parts), metadata=metadata)
+
+
+def _extract_msg(path: Path) -> ExtractedDocument:
+    metadata: dict[str, Any] = {"source_format": "msg"}
+    with extract_msg.openMsg(str(path)) as message:
+        body = (message.body or "").strip()
+        if message.subject:
+            metadata["title"] = message.subject.strip()
+        if message.sender:
+            metadata["sender"] = message.sender.strip()
+        if message.to:
+            metadata["to"] = message.to.strip()
+        if message.cc:
+            metadata["cc"] = message.cc.strip()
+        if message.date:
+            metadata["date"] = _isoformat(message.date)
+        attachment_names = [name.strip() for name in (a.name for a in message.attachments) if name]
+        if attachment_names:
+            metadata["attachment_count"] = len(attachment_names)
+            metadata["attachment_names"] = attachment_names
+
+    return ExtractedDocument(content=body, metadata=metadata)
 
 
 def _read_text(path: Path) -> str:

@@ -36,7 +36,7 @@ answered by files open in the workspace. For better agent behavior, copy
 
 ```mermaid
 flowchart TD
-    A["knowledge/ files<br/>txt, md, rst, log, vtt, srt, pdf, docx"] --> B["Scanner<br/>every 30 seconds"]
+    A["knowledge/ files<br/>txt, md, rst, log, vtt, srt, pdf, docx, pptx, msg"] --> B["Scanner<br/>every 30 seconds"]
     B --> C["Parser<br/>text extraction + reliable metadata"]
     C --> D["Checksum dedupe<br/>one active canonical document"]
     D --> E["Chunker<br/>LangChain RecursiveTextSplitter"]
@@ -101,7 +101,7 @@ Useful commands:
 Drop supported files into `knowledge/`, including nested directories:
 
 ```text
-.txt .md .markdown .rst .log .vtt .srt .pdf .docx
+.txt .md .markdown .rst .log .vtt .srt .pdf .docx .pptx .msg
 ```
 
 The scanner runs every `SCAN_INTERVAL_SECONDS` seconds, default `30`. New or changed files are
@@ -160,8 +160,10 @@ If metadata is missing, the parser uses only reliable signals:
 4. file modification time.
 
 For Teams/WebVTT transcripts it can also capture title labels, speakers from `<v Speaker Name>`,
-language, duration, source type, and transcript format. PDF and DOCX files are indexed from
+language, duration, source type, and transcript format. PDF, DOCX, and PPTX files are indexed from
 extractable text and reliable document properties. Scanned image-only PDFs need OCR before ingestion.
+Outlook `.msg` files are indexed from the plain-text body, with subject, sender, recipients, date, and
+attachment names captured as metadata.
 
 The parser does not infer `project` from free text. Add `project` in front matter when you want
 project filtering.
