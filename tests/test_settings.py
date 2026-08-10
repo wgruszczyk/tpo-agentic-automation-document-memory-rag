@@ -8,7 +8,14 @@ def test_default_scan_interval_is_30_seconds() -> None:
 
 def test_default_supported_extensions_include_documents() -> None:
     settings = Settings(_env_file=None)
-    assert {".txt", ".md", ".vtt", ".srt", ".pdf", ".docx", ".pptx", ".msg"}.issubset(
+    assert {".txt", ".md", ".vtt", ".srt", ".pdf", ".docx", ".pptx", ".xlsx", ".msg"}.issubset(
+        settings.extensions
+    )
+
+
+def test_default_supported_extensions_include_images() -> None:
+    settings = Settings(_env_file=None)
+    assert {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif"}.issubset(
         settings.extensions
     )
 

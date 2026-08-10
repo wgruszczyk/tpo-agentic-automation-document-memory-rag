@@ -23,17 +23,23 @@ class LocalHFEmbeddingProvider(EmbeddingProvider):
             return self._model
         with self._lock:
             if self._model is None:
+                cached = self._is_model_cached()
+                if cached:
+                    # Model already downloaded: skip Hub freshness checks so restarts stay fully
+                    # offline. The env vars cover libraries that read them lazily; local_files_only
+                    # is the authoritative switch because huggingface_hub snapshots its env-based
+                    # constants at import time.
+                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
                 import torch
                 from sentence_transformers import SentenceTransformer
 
                 torch.set_num_threads(self.settings.local_embedding_threads)
-                if self._is_model_cached():
-                    # Model already downloaded: skip Hub freshness checks so restarts stay fully offline.
-                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
                 kwargs: dict[str, Any] = {
                     "device": "cpu",
                     "cache_folder": str(self.settings.hf_home),
+                    "local_files_only": cached,
                 }
                 if self.settings.embedding_revision:
                     kwargs["revision"] = self.settings.embedding_revision

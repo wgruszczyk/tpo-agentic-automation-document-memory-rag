@@ -14,10 +14,20 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://product_memory:product_memory_local_only@db:5432/product_memory"
     knowledge_dir: Path = Path("/knowledge")
     scan_interval_seconds: float = 30.0
-    supported_extensions: str = ".txt,.md,.markdown,.rst,.log,.vtt,.srt,.pdf,.docx,.pptx,.msg"
+    supported_extensions: str = (
+        ".txt,.md,.markdown,.rst,.log,.vtt,.srt,.pdf,.docx,.pptx,.xlsx,.msg,"
+        ".png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.gif"
+    )
 
     chunk_size: int = Field(default=1800, ge=300)
     chunk_overlap: int = Field(default=250, ge=0)
+
+    enable_ocr: bool = True
+    ocr_languages: str = "eng+pol"
+    ocr_max_images_per_document: int = Field(default=100, ge=1, le=2000)
+    ocr_min_image_pixels: int = Field(default=10_000, ge=0)
+    ocr_min_characters: int = Field(default=12, ge=1)
+    ocr_timeout_seconds: float = Field(default=30.0, gt=0)
 
     embedding_provider: Literal["local_hf", "openai"] = "local_hf"
     embedding_model: str = "intfloat/multilingual-e5-small"
@@ -69,6 +79,10 @@ class Settings(BaseSettings):
     @property
     def extensions(self) -> set[str]:
         return {item.strip().lower() for item in self.supported_extensions.split(",") if item.strip()}
+
+    @property
+    def ocr_language_list(self) -> list[str]:
+        return [item.strip() for item in self.ocr_languages.replace(",", "+").split("+") if item.strip()]
 
     @property
     def allowed_hosts(self) -> list[str]:

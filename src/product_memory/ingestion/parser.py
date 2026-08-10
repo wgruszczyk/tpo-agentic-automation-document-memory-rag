@@ -13,6 +13,7 @@ from dateutil import parser as date_parser
 
 from product_memory.ingestion.extractors import extract_document, strip_null_bytes
 from product_memory.ingestion.metadata import infer_document_metadata
+from product_memory.ingestion.ocr import OcrEngine
 from product_memory.settings import Settings
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -31,16 +32,21 @@ class ParsedDocument:
     metadata: dict[str, Any]
 
 
+class EmptyDocumentError(ValueError):
+    """Raised when a file carries no extractable text, such as a picture without readable text."""
+
+
 class DocumentParser:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.ocr = OcrEngine(settings)
 
     def parse(self, path: Path) -> ParsedDocument:
-        extracted = extract_document(path)
+        extracted = extract_document(path, self.ocr)
         frontmatter, content = self._extract_frontmatter(extracted.content)
         content = content.strip()
         if not content:
-            raise ValueError(f"Document is empty: {path}")
+            raise EmptyDocumentError(f"Document has no extractable text: {path}")
 
         metadata = {**extracted.metadata, **infer_document_metadata(path, content), **frontmatter}
         metadata = strip_null_bytes(metadata)

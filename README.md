@@ -36,7 +36,7 @@ answered by files open in the workspace. For better agent behavior, copy
 
 ```mermaid
 flowchart TD
-    A["knowledge/ files<br/>txt, md, rst, log, vtt, srt, pdf, docx, pptx, msg"] --> B["Scanner<br/>every 30 seconds"]
+    A["knowledge/ files<br/>txt, md, rst, log, vtt, srt, pdf, docx, pptx, xlsx, msg, images"] --> B["Scanner<br/>every 30 seconds"]
     B --> C["Parser<br/>text extraction + reliable metadata"]
     C --> D["Checksum dedupe<br/>one active canonical document"]
     D --> E["Chunker<br/>LangChain RecursiveTextSplitter"]
@@ -101,7 +101,8 @@ Useful commands:
 Drop supported files into `knowledge/`, including nested directories:
 
 ```text
-.txt .md .markdown .rst .log .vtt .srt .pdf .docx .pptx .msg
+.txt .md .markdown .rst .log .vtt .srt .pdf .docx .pptx .xlsx .msg
+.png .jpg .jpeg .tif .tiff .bmp .webp .gif
 ```
 
 The scanner runs every `SCAN_INTERVAL_SECONDS` seconds, default `30`. New or changed files are
@@ -160,13 +161,44 @@ If metadata is missing, the parser uses only reliable signals:
 4. file modification time.
 
 For Teams/WebVTT transcripts it can also capture title labels, speakers from `<v Speaker Name>`,
-language, duration, source type, and transcript format. PDF, DOCX, and PPTX files are indexed from
-extractable text and reliable document properties. Scanned image-only PDFs need OCR before ingestion.
-Outlook `.msg` files are indexed from the plain-text body, with subject, sender, recipients, date, and
-attachment names captured as metadata.
+language, duration, source type, and transcript format. PDF, DOCX, PPTX, and XLSX files are indexed
+from extractable text and reliable document properties. Spreadsheets are read sheet by sheet, one row
+per line, capped at 5000 rows per sheet. Outlook `.msg` files are indexed from the plain-text body,
+with subject, sender, recipients, date, and attachment names captured as metadata.
 
 The parser does not infer `project` from free text. Add `project` in front matter when you want
 project filtering.
+
+## Images and Scans
+
+Pictures, screenshots, and scans are read with Tesseract OCR, which runs locally on CPU inside the
+container. No image ever leaves your machine. This covers two cases:
+
+- standalone image files dropped into `knowledge/`,
+- images embedded in PDF, DOCX, PPTX, and XLSX files, including PDFs that are pure scans.
+
+Recognised text is appended to the document under an `[Image text: ...]` marker, so it is chunked,
+embedded, and retrieved exactly like ordinary text. Documents also gain `ocr_applied`,
+`ocr_image_count`, and `embedded_image_count` metadata.
+
+OCR is enabled by default and controlled from `.env`:
+
+```dotenv
+ENABLE_OCR=true
+OCR_LANGUAGES=eng+pol
+OCR_MAX_IMAGES_PER_DOCUMENT=100
+OCR_MIN_IMAGE_PIXELS=10000
+OCR_MIN_CHARACTERS=12
+OCR_TIMEOUT_SECONDS=30
+```
+
+Set `ENABLE_OCR=false` to index only text that is already machine readable. When OCR is off, or when
+an image holds no readable text, the file is reported as `skipped` by the scanner instead of failing.
+
+`OCR_MIN_IMAGE_PIXELS` skips logos and icons, `OCR_MAX_IMAGES_PER_DOCUMENT` bounds the CPU cost of a
+single file, and `OCR_MIN_CHARACTERS` discards recognition noise. The image ships the `eng` and `pol`
+language packs; add more by extending the `tesseract-ocr-*` packages in the `Dockerfile` and listing
+them in `OCR_LANGUAGES`.
 
 ## Retrieval Defaults
 

@@ -14,7 +14,7 @@ import numpy as np
 from product_memory.db import Database
 from product_memory.embeddings.base import EmbeddingProvider
 from product_memory.ingestion.chunker import DocumentChunker
-from product_memory.ingestion.parser import DocumentParser, ParsedDocument
+from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError, ParsedDocument
 from product_memory.settings import Settings
 
 LOGGER = logging.getLogger(__name__)
@@ -130,11 +130,14 @@ class IngestionService:
         root.mkdir(parents=True, exist_ok=True)
         paths = self._discover_paths(root)
         parsed_documents: list[ParsedDocument] = []
-        added = updated = unchanged = failed = 0
+        added = updated = unchanged = failed = skipped = 0
 
         for path in paths:
             try:
                 parsed_documents.append(self.parser.parse(path))
+            except EmptyDocumentError as error:
+                skipped += 1
+                LOGGER.info("Skipping %s", error)
             except Exception:
                 failed += 1
                 LOGGER.exception("Failed to ingest %s", path)
@@ -158,6 +161,7 @@ class IngestionService:
             "unchanged": unchanged,
             "removed": removed,
             "failed": failed,
+            "skipped": skipped,
             "duplicates": duplicates,
         }
         if added or updated or removed or failed or duplicates:

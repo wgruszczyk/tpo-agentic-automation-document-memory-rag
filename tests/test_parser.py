@@ -2,11 +2,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import extract_msg
+import pytest
 from docx import Document as DocxDocument
+from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XlsxImage
+from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches
 
-from product_memory.ingestion.parser import DocumentParser
+from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError
 from product_memory.settings import Settings
 
 
@@ -228,6 +232,169 @@ def test_extracts_msg_content_and_properties(tmp_path: Path, monkeypatch) -> Non
     assert parsed.metadata["attachment_names"] == ["contract.pdf"]
     assert parsed.metadata["extension"] == ".msg"
     assert parsed.effective_at == datetime(2026, 3, 4, 12, 30, tzinfo=UTC)
+
+
+class _StubOcr:
+    """Stands in for Tesseract so tests stay deterministic and offline."""
+
+    def __init__(self, text: str, settings: Settings) -> None:
+        self.text = text
+        self.settings = settings
+        self.calls = 0
+
+    def available(self) -> bool:
+        return True
+
+    def should_read(self, _image: object) -> bool:
+        return True
+
+    def image_to_text(self, _image: object) -> str:
+        self.calls += 1
+        return self.text
+
+
+def _write_png(path: Path, size: tuple[int, int] = (240, 120)) -> Path:
+    Image.new("RGB", size, color="white").save(path)
+    return path
+
+
+def _parser_with_ocr(tmp_path: Path, text: str) -> tuple[DocumentParser, _StubOcr]:
+    settings = Settings(knowledge_dir=tmp_path)
+    parser = DocumentParser(settings)
+    stub = _StubOcr(text, settings)
+    parser.ocr = stub
+    return parser, stub
+
+
+def test_extracts_text_from_a_scanned_image(tmp_path: Path) -> None:
+    path = _write_png(tmp_path / "invoice-scan.png")
+    parser, stub = _parser_with_ocr(tmp_path, "Invoice 2026/03 total 1200 PLN")
+
+    parsed = parser.parse(path)
+
+    assert "Invoice 2026/03 total 1200 PLN" in parsed.content
+    assert parsed.metadata["source_format"] == "image"
+    assert parsed.metadata["image_width"] == 240
+    assert parsed.metadata["image_height"] == 120
+    assert parsed.metadata["ocr_applied"] is True
+    assert stub.calls == 1
+
+
+def test_image_without_readable_text_is_skipped(tmp_path: Path) -> None:
+    path = _write_png(tmp_path / "logo.png")
+    parser, _ = _parser_with_ocr(tmp_path, "")
+
+    with pytest.raises(EmptyDocumentError):
+        parser.parse(path)
+
+
+def test_images_are_ignored_when_ocr_is_disabled(tmp_path: Path) -> None:
+    path = _write_png(tmp_path / "diagram.png")
+    parser = DocumentParser(Settings(knowledge_dir=tmp_path, enable_ocr=False))
+
+    with pytest.raises(EmptyDocumentError):
+        parser.parse(path)
+
+
+def test_reads_text_from_images_embedded_in_a_deck(tmp_path: Path) -> None:
+    picture = _write_png(tmp_path / "chart.png")
+    path = tmp_path / "quarterly-review.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Quarterly Review"
+    slide.shapes.add_picture(str(picture), Inches(1), Inches(2), Inches(4), Inches(3))
+    presentation.save(path)
+    parser, stub = _parser_with_ocr(tmp_path, "Revenue grew 18 percent")
+
+    parsed = parser.parse(path)
+
+    assert "Quarterly Review" in parsed.content
+    assert "[Image text: slide 1]" in parsed.content
+    assert "Revenue grew 18 percent" in parsed.content
+    assert parsed.metadata["ocr_applied"] is True
+    assert parsed.metadata["ocr_image_count"] == 1
+    assert stub.calls == 1
+
+
+def test_deck_images_are_left_alone_when_ocr_is_disabled(tmp_path: Path) -> None:
+    picture = _write_png(tmp_path / "chart.png")
+    path = tmp_path / "quarterly-review.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Quarterly Review"
+    slide.shapes.add_picture(str(picture), Inches(1), Inches(2), Inches(4), Inches(3))
+    presentation.save(path)
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path, enable_ocr=False)).parse(path)
+
+    assert parsed.content.strip() == "Quarterly Review"
+    assert "ocr_applied" not in parsed.metadata
+
+
+def test_ocr_stops_after_the_image_budget_is_reached(tmp_path: Path) -> None:
+    picture = _write_png(tmp_path / "chart.png")
+    path = tmp_path / "many-images.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Many Images"
+    for offset in range(3):
+        slide.shapes.add_picture(str(picture), Inches(1), Inches(1 + offset), Inches(2), Inches(1))
+    presentation.save(path)
+
+    settings = Settings(knowledge_dir=tmp_path, ocr_max_images_per_document=2)
+    parser = DocumentParser(settings)
+    stub = _StubOcr("Revenue grew 18 percent", settings)
+    parser.ocr = stub
+
+    parsed = parser.parse(path)
+
+    assert stub.calls == 2
+    assert parsed.metadata["embedded_image_count"] == 3
+    assert parsed.metadata["ocr_image_count"] == 2
+
+
+def test_extracts_spreadsheet_cells_sheets_and_properties(tmp_path: Path) -> None:
+    path = tmp_path / "commercial-offer.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Pricing"
+    sheet.append(["Service", "Fee"])
+    sheet.append(["Transaction", 0.35])
+    second = workbook.create_sheet("Notes")
+    second.append(["Valid until 2026-12-31"])
+    workbook.properties.title = "Commercial Offer"
+    workbook.properties.creator = "Finance"
+    workbook.save(path)
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert parsed.title == "Commercial Offer"
+    assert "Service | Fee" in parsed.content
+    assert "Transaction | 0.35" in parsed.content
+    assert "Valid until 2026-12-31" in parsed.content
+    assert parsed.metadata["source_format"] == "xlsx"
+    assert parsed.metadata["sheet_count"] == 2
+    assert parsed.metadata["sheet_names"] == ["Pricing", "Notes"]
+    assert parsed.metadata["author"] == "Finance"
+    assert parsed.metadata["extension"] == ".xlsx"
+
+
+def test_reads_text_from_images_embedded_in_a_spreadsheet(tmp_path: Path) -> None:
+    picture = _write_png(tmp_path / "chart.png")
+    path = tmp_path / "with-chart.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Quarterly figures"])
+    sheet.add_image(XlsxImage(str(picture)), "C3")
+    workbook.save(path)
+    parser, stub = _parser_with_ocr(tmp_path, "Revenue grew 18 percent")
+
+    parsed = parser.parse(path)
+
+    assert "Quarterly figures" in parsed.content
+    assert "Revenue grew 18 percent" in parsed.content
+    assert parsed.metadata["ocr_image_count"] == 1
+    assert stub.calls == 1
 
 
 def _write_simple_pdf(path: Path, title: str, body: str) -> None:
