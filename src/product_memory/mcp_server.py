@@ -75,13 +75,16 @@ def retrieve_knowledge(
     project: str | None = None,
     include_full_documents: bool = True,
     max_context_chars: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> dict:
     """Retrieve ranked chunks, whole top documents, and a compressed source-preserving context pack.
 
     Use this first for questions about private project history, Teams meetings, product requirements,
     decisions, risks, commitments, roadmap context, and implementation planning that depends on those
     sources. Polish and English queries are supported. Newer documents receive a configurable ranking
-    boost.
+    boost. Pass since or until as ISO dates to restrict results to documents effective in that window,
+    for example since='2026-06-01' for what changed recently.
     """
     response = runtime.retriever.retrieve(
         query=query,
@@ -90,18 +93,29 @@ def retrieve_knowledge(
         project=project,
         include_full_documents=include_full_documents,
         max_context_chars=max_context_chars,
+        since=since,
+        until=until,
     )
     return response.model_dump(mode="json")
 
 
 @mcp.tool()
-def search(query: str, limit: int = 10, project: str | None = None) -> dict:
+def search(
+    query: str,
+    limit: int = 10,
+    project: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict:
     """Search the knowledge base and return concise document-level results.
 
     Use this when you need to find relevant private project documents before fetching complete sources.
     This tool follows the common MCP search shape. Call fetch with a returned id for the full document.
+    since and until accept ISO dates and filter on when a document took effect.
     """
-    return runtime.retriever.search(query=query, limit=limit, project=project).model_dump(mode="json")
+    return runtime.retriever.search(
+        query=query, limit=limit, project=project, since=since, until=until
+    ).model_dump(mode="json")
 
 
 @mcp.tool()
@@ -111,9 +125,16 @@ def fetch(id: str) -> dict:  # noqa: A002
 
 
 @mcp.tool()
-def list_documents(limit: int = 100, project: str | None = None) -> dict:
-    """List ingested private project documents newest first, optionally filtered by project metadata."""
-    documents = runtime.retriever.list_documents(limit=limit, project=project)
+def list_documents(
+    limit: int = 100,
+    project: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict:
+    """List ingested private project documents newest first, optionally filtered by project and dates."""
+    documents = runtime.retriever.list_documents(
+        limit=limit, project=project, since=since, until=until
+    )
     return {"documents": [document.model_dump(mode="json") for document in documents]}
 
 

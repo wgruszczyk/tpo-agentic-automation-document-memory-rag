@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     ocr_timeout_seconds: float = Field(default=30.0, gt=0)
 
     embedding_provider: Literal["local_hf", "openai"] = "local_hf"
-    embedding_model: str = "intfloat/multilingual-e5-small"
+    embedding_model: str = "intfloat/multilingual-e5-base"
     embedding_revision: str | None = None
     embedding_dimensions: int | None = Field(default=None, ge=1)
     embedding_batch_size: int = Field(default=16, ge=1, le=256)
@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     recency_weight: float = Field(default=0.15, ge=0)
     recency_half_life_days: float = Field(default=180, gt=0)
 
-    min_relevance_score: float = Field(default=0.70, ge=0, le=1)
+    # Gates on meaning alone. Blending recency in here used to hide old documents that still answer
+    # the question, which is the wrong call for signed contracts.
+    min_semantic_score: float = Field(default=0.60, ge=0, le=1)
     max_returned_documents: int = Field(default=25, ge=1, le=25)
     default_top_k_chunks: int = Field(default=10, ge=1, le=50)
     default_top_k_documents: int = Field(default=7, ge=1, le=25)

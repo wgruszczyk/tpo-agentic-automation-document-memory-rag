@@ -25,6 +25,7 @@ LOGGER = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif"}
 SPREADSHEET_ROW_LIMIT = 5000
 MAX_EMBEDDED_IMAGE_BYTES = 50 * 1024 * 1024
+TABLE_MAX_LABELLED_COLUMNS = 15
 
 
 @dataclass(slots=True)
@@ -194,10 +195,8 @@ def _extract_docx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
     parts = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
 
     for table in document.tables:
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-            if cells:
-                parts.append(" | ".join(cells))
+        rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+        parts.extend(_table_lines(rows))
 
     metadata: dict[str, Any] = {"source_format": "docx"}
     if collector.active:
@@ -234,10 +233,8 @@ def _extract_pptx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
                 if text:
                     slide_parts.append(text)
             if shape.has_table:
-                for row in shape.table.rows:
-                    cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                    if cells:
-                        slide_parts.append(" | ".join(cells))
+                rows = [[cell.text.strip() for cell in row.cells] for row in shape.table.rows]
+                slide_parts.extend(_table_lines(rows))
             if collector.active and getattr(shape, "image", None) is not None:
                 collector.add_bytes(f"slide {number}", shape.image.blob)
 
@@ -275,16 +272,17 @@ def _extract_xlsx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
     truncated = False
     try:
         for sheet in workbook.worksheets:
-            rows: list[str] = []
+            rows: list[list[str]] = []
             for index, row in enumerate(sheet.iter_rows(values_only=True)):
                 if index >= SPREADSHEET_ROW_LIMIT:
                     truncated = True
                     break
-                cells = [str(value).strip() for value in row if value is not None and str(value).strip()]
-                if cells:
-                    rows.append(" | ".join(cells))
-            if rows:
-                parts.append(f"# {sheet.title}\n" + "\n".join(rows))
+                cells = ["" if value is None else str(value).strip() for value in row]
+                if any(cells):
+                    rows.append(cells)
+            lines = _table_lines(rows)
+            if lines:
+                parts.append(f"# {sheet.title}\n" + "\n".join(lines))
 
         metadata: dict[str, Any] = {
             "source_format": "xlsx",
@@ -316,6 +314,32 @@ def _extract_xlsx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
 
     collector.apply_metadata(metadata)
     return ExtractedDocument(content=collector.compose("\n\n".join(parts)), metadata=metadata)
+
+
+def _table_lines(rows: list[list[str]]) -> list[str]:
+    # Chunking splits long tables, so each row repeats its column headers to stay readable alone.
+    filled = [row for row in rows if any(cell for cell in row)]
+    if not filled:
+        return []
+    header = filled[0]
+    labelled = (
+        1 < len(header) <= TABLE_MAX_LABELLED_COLUMNS
+        and all(cell for cell in header)
+        and len(set(header)) == len(header)
+    )
+    if not labelled:
+        return [" | ".join(cell for cell in row if cell) for row in filled]
+
+    lines = [" | ".join(header)]
+    for row in filled[1:]:
+        pairs = [
+            f"{header[index]}: {cell}"
+            for index, cell in enumerate(row)
+            if index < len(header) and cell
+        ]
+        if pairs:
+            lines.append(" | ".join(pairs))
+    return lines
 
 
 def _embedded_media(path: Path, prefix: str) -> Iterator[tuple[str, bytes]]:

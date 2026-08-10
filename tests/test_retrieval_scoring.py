@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+import pytest
+
 from product_memory.embeddings.base import EmbeddingProvider
 from product_memory.models import ChunkResult
-from product_memory.retrieval.service import Retriever
+from product_memory.retrieval.service import Retriever, parse_boundary
 from product_memory.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,8 +101,56 @@ def test_search_chunks_uses_stronger_lexical_signals() -> None:
     assert "position(q.raw_query in lower(coalesce(c.content, '')))" in sql
     assert "similarity(coalesce(d.title, ''), %(query)s)" in sql
     assert "word_similarity(%(query)s, coalesce(c.content, ''))" in sql
-    assert db.connection_instance.params["min_relevance_score"] == 0.70
-    assert "WHERE score >= %(min_relevance_score)s" in sql
+    assert db.connection_instance.params["min_semantic_score"] == 0.60
+    assert "WHERE semantic_score >= %(min_semantic_score)s" in sql
+
+
+def test_search_chunks_filters_by_effective_date_window() -> None:
+    db = FakeDatabase()
+    retriever = Retriever(
+        settings=Settings(_env_file=None),
+        db=db,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=None,  # type: ignore[arg-type]
+    )
+
+    retriever._search_chunks(  # noqa: SLF001
+        query="payment retries",
+        profile_hash="profile",
+        limit=5,
+        project=None,
+        since=datetime(2026, 1, 1, tzinfo=UTC),
+        until=datetime(2026, 12, 31, tzinfo=UTC),
+    )
+
+    sql = db.connection_instance.sql
+    assert "d.effective_at >= %(since)s::timestamptz" in sql
+    assert "d.effective_at <= %(until)s::timestamptz" in sql
+    assert db.connection_instance.params["since"] == datetime(2026, 1, 1, tzinfo=UTC)
+    assert db.connection_instance.params["until"] == datetime(2026, 12, 31, tzinfo=UTC)
+
+
+def test_parse_boundary_reads_iso_dates_and_assumes_utc() -> None:
+    assert parse_boundary("2026-03-01", "since") == datetime(2026, 3, 1, tzinfo=UTC)
+    assert parse_boundary("", "since") is None
+    assert parse_boundary(None, "since") is None
+
+
+def test_parse_boundary_rejects_nonsense() -> None:
+    with pytest.raises(ValueError, match="not a recognisable date"):
+        parse_boundary("whenever", "since")
+
+
+def test_retrieve_rejects_an_inverted_date_window() -> None:
+    retriever = CapturingRetriever(
+        settings=Settings(_env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError, match="since must not be later than until"):
+        retriever.retrieve("payment retries", since="2026-06-01", until="2026-01-01")
 
 
 def test_retrieve_caps_requested_document_limit_to_configured_max() -> None:
@@ -160,7 +210,13 @@ class CapturingRetriever(Retriever):
         return {"status": "ready", "fingerprint": "profile"}
 
     def _search_chunks(
-        self, query: str, profile_hash: str, limit: int, project: str | None
+        self,
+        query: str,
+        profile_hash: str,
+        limit: int,
+        project: str | None,
+        since: datetime | None = None,
+        until: datetime | None = None,
     ) -> list[ChunkResult]:
         return []
 

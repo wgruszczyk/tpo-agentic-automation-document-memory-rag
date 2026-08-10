@@ -50,7 +50,19 @@ def test_is_model_cached_true_when_snapshot_present(tmp_path) -> None:
     settings = Settings(_env_file=None, hf_home=tmp_path, embedding_model="intfloat/multilingual-e5-small")
     snapshots_dir = tmp_path / "models--intfloat--multilingual-e5-small" / "snapshots" / "abc123"
     snapshots_dir.mkdir(parents=True)
+    (snapshots_dir / "model.safetensors").write_bytes(b"weights")
 
     provider = LocalHFEmbeddingProvider(settings)
 
     assert provider._is_model_cached() is True
+
+
+def test_is_model_cached_false_when_only_config_files_downloaded(tmp_path) -> None:
+    settings = Settings(_env_file=None, hf_home=tmp_path, embedding_model="intfloat/multilingual-e5-small")
+    snapshots_dir = tmp_path / "models--intfloat--multilingual-e5-small" / "snapshots" / "abc123"
+    snapshots_dir.mkdir(parents=True)
+    (snapshots_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    provider = LocalHFEmbeddingProvider(settings)
+
+    assert provider._is_model_cached() is False

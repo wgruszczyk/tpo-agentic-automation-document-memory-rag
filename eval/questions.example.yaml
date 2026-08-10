@@ -1,0 +1,20 @@
+# Retrieval regression questions.
+#
+# Copy to questions.yaml and replace these with real questions about your own knowledge base.
+# questions.yaml is gitignored so private document names stay out of version control.
+#
+# expect lists case-insensitive fragments of source_path. A question counts as a hit when any
+# fragment appears in the top documents returned for that question.
+
+- question: What are the agreed payment terms?
+  expect:
+    - framework-agreement
+
+- question: Which brands are available in each country?
+  expect:
+    - country-matrix
+    - market-overview
+
+- question: What was decided about discount handling?
+  expect:
+    - discounts

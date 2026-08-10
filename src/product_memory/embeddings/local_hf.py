@@ -47,9 +47,18 @@ class LocalHFEmbeddingProvider(EmbeddingProvider):
         return self._model
 
     def _is_model_cached(self) -> bool:
+        # An interrupted download leaves config files behind without weights. Treating that as
+        # cached would switch on offline mode and make the failure permanent, so require weights.
         cache_dir_name = "models--" + self.settings.embedding_model.replace("/", "--")
         snapshots_dir = self.settings.hf_home / cache_dir_name / "snapshots"
-        return snapshots_dir.is_dir() and any(snapshots_dir.iterdir())
+        if not snapshots_dir.is_dir():
+            return False
+        return any(
+            any(snapshot.glob(pattern))
+            for snapshot in snapshots_dir.iterdir()
+            if snapshot.is_dir()
+            for pattern in ("*.safetensors", "pytorch_model.bin")
+        )
 
     @property
     def uses_e5_prefixes(self) -> bool:

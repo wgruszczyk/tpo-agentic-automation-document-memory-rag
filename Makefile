@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status ingest reindex rebuild smoke query link-knowledge test clean reset-data
+.PHONY: start stop restart logs status ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -42,6 +42,11 @@ smoke:
 query:
 	@test -n "$(q)" || (echo "Usage: make query q='What did we decide about payment retries?'" >&2; exit 2)
 	$(COMPOSE) exec product-memory product-memory query --url http://127.0.0.1:8080/mcp $(args) "$(q)"
+
+# Scores retrieval against eval/questions.yaml, which stays out of version control.
+eval:
+	@test -f eval/questions.yaml || (echo "Create eval/questions.yaml from eval/questions.example.yaml" >&2; exit 2)
+	$(COMPOSE) exec product-memory product-memory eval $(args)
 
 link-knowledge:
 	@test -f .env || cp .env.example .env

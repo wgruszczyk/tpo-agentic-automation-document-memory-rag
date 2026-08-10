@@ -431,13 +431,43 @@ def test_extracts_spreadsheet_cells_sheets_and_properties(tmp_path: Path) -> Non
 
     assert parsed.title == "Commercial Offer"
     assert "Service | Fee" in parsed.content
-    assert "Transaction | 0.35" in parsed.content
+    assert "Service: Transaction | Fee: 0.35" in parsed.content
     assert "Valid until 2026-12-31" in parsed.content
     assert parsed.metadata["source_format"] == "xlsx"
     assert parsed.metadata["sheet_count"] == 2
     assert parsed.metadata["sheet_names"] == ["Pricing", "Notes"]
     assert parsed.metadata["author"] == "Finance"
     assert parsed.metadata["extension"] == ".xlsx"
+
+
+def test_spreadsheet_rows_repeat_their_column_headers(tmp_path: Path) -> None:
+    path = tmp_path / "fees.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Payment fees EU"
+    sheet.append(["Country", "Method", "Fee"])
+    for number in range(40):
+        sheet.append([f"Country {number}", "Card", f"{number}.10 EUR"])
+    workbook.save(path)
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    # A late row must still name its columns, because chunking cuts the sheet away from its header.
+    assert "Country: Country 39 | Method: Card | Fee: 39.10 EUR" in parsed.content
+
+
+def test_spreadsheet_without_a_usable_header_keeps_plain_rows(tmp_path: Path) -> None:
+    path = tmp_path / "notes.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Country", None, "Fee"])
+    sheet.append(["Poland", "Card", "1.10 EUR"])
+    workbook.save(path)
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert "Country | Fee" in parsed.content
+    assert "Poland | Card | 1.10 EUR" in parsed.content
 
 
 def test_reads_text_from_images_embedded_in_a_spreadsheet(tmp_path: Path) -> None:

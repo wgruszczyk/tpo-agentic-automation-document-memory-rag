@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
+from dateutil import parser as date_parser
 
 from product_memory.db import Database
 from product_memory.embeddings.base import EmbeddingProvider
@@ -18,6 +20,19 @@ from product_memory.models import (
 )
 from product_memory.retrieval.compressor import ContextCompressor
 from product_memory.settings import Settings
+
+
+def parse_boundary(value: str | datetime | None, label: str) -> datetime | None:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = date_parser.parse(value.strip())
+        except (ValueError, OverflowError) as exc:
+            raise ValueError(f"{label} is not a recognisable date: {value!r}") from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 class Retriever:
@@ -41,10 +56,16 @@ class Retriever:
         project: str | None = None,
         include_full_documents: bool = True,
         max_context_chars: int | None = None,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
     ) -> RetrievalResponse:
         query = query.strip()
         if not query:
             raise ValueError("query cannot be empty")
+        since_at = parse_boundary(since, "since")
+        until_at = parse_boundary(until, "until")
+        if since_at and until_at and since_at > until_at:
+            raise ValueError("since must not be later than until")
         profile = self._ready_profile()
         chunk_limit = min(max(top_k_chunks or self.settings.default_top_k_chunks, 1), 50)
         document_limit = min(
@@ -61,6 +82,8 @@ class Retriever:
             profile_hash=profile["fingerprint"],
             limit=chunk_limit,
             project=project,
+            since=since_at,
+            until=until_at,
         )
         documents = self._documents_for_chunks(
             chunks,
@@ -79,7 +102,14 @@ class Retriever:
             index_profile=profile,
         )
 
-    def search(self, query: str, limit: int = 10, project: str | None = None) -> SearchResponse:
+    def search(
+        self,
+        query: str,
+        limit: int = 10,
+        project: str | None = None,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
+    ) -> SearchResponse:
         limit = min(max(limit, 1), 50)
         response = self.retrieve(
             query=query,
@@ -88,6 +118,8 @@ class Retriever:
             project=project,
             include_full_documents=False,
             max_context_chars=4000,
+            since=since,
+            until=until,
         )
         results = [
             SearchItem(
@@ -154,20 +186,35 @@ class Retriever:
                 )
         raise KeyError(f"No active document or chunk found for id: {item_id}")
 
-    def list_documents(self, limit: int = 100, project: str | None = None) -> list[DocumentResult]:
+    def list_documents(
+        self,
+        limit: int = 100,
+        project: str | None = None,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
+    ) -> list[DocumentResult]:
         limit = min(max(limit, 1), 500)
         params: list[Any] = []
         project_clause = ""
         if project:
             project_clause = "AND metadata->>'project' = %s"
             params.append(project)
+        date_clause = ""
+        since_at = parse_boundary(since, "since")
+        until_at = parse_boundary(until, "until")
+        if since_at:
+            date_clause += " AND effective_at >= %s"
+            params.append(since_at)
+        if until_at:
+            date_clause += " AND effective_at <= %s"
+            params.append(until_at)
         params.append(limit)
         with self.db.connection() as conn:
             rows = conn.execute(
                 f"""
                 SELECT id, title, source_path, effective_at, source_modified_at, metadata
                 FROM documents
-                WHERE is_active = TRUE {project_clause}
+                WHERE is_active = TRUE {project_clause}{date_clause}
                 ORDER BY effective_at DESC
                 LIMIT %s
                 """,
@@ -213,7 +260,13 @@ class Retriever:
         return profile
 
     def _search_chunks(
-        self, query: str, profile_hash: str, limit: int, project: str | None
+        self,
+        query: str,
+        profile_hash: str,
+        limit: int,
+        project: str | None,
+        since: datetime | None = None,
+        until: datetime | None = None,
     ) -> list[ChunkResult]:
         query_embedding = np.asarray(self.provider.embed_query(query), dtype=np.float32)
         params: dict[str, Any] = {
@@ -225,10 +278,16 @@ class Retriever:
             "lexical_weight": self.settings.lexical_weight,
             "recency_weight": self.settings.recency_weight,
             "half_life": self.settings.recency_half_life_days,
-            "min_relevance_score": self.settings.min_relevance_score,
+            "min_semantic_score": self.settings.min_semantic_score,
             "project": project,
+            "since": since,
+            "until": until,
         }
         project_clause = "AND (%(project)s::text IS NULL OR d.metadata->>'project' = %(project)s::text)"
+        date_clause = (
+            "AND (%(since)s::timestamptz IS NULL OR d.effective_at >= %(since)s::timestamptz) "
+            "AND (%(until)s::timestamptz IS NULL OR d.effective_at <= %(until)s::timestamptz)"
+        )
         sql = f"""
             WITH query_input AS (
                 SELECT
@@ -294,6 +353,7 @@ class Retriever:
                 WHERE d.is_active = TRUE
                   AND c.embedding_profile_hash = %(profile_hash)s
                   {project_clause}
+                  {date_clause}
             ),
             ranked AS (
                 SELECT *,
@@ -304,7 +364,7 @@ class Retriever:
             )
             SELECT *
             FROM ranked
-            WHERE score >= %(min_relevance_score)s
+            WHERE semantic_score >= %(min_semantic_score)s
             ORDER BY score DESC, effective_at DESC
             LIMIT %(limit)s
         """

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -98,6 +99,8 @@ def query_mcp(
     top_k_chunks: int = typer.Option(10, min=1, max=50, help="Maximum ranked chunks to return."),
     top_k_documents: int = typer.Option(7, min=1, max=25, help="Maximum complete documents to return."),
     project: str | None = typer.Option(None, help="Optional metadata.project filter."),
+    since: str | None = typer.Option(None, help="Only documents effective on or after this ISO date."),
+    until: str | None = typer.Option(None, help="Only documents effective on or before this ISO date."),
     include_full_documents: bool = typer.Option(
         True,
         "--include-full-documents/--no-full-documents",
@@ -114,6 +117,8 @@ def query_mcp(
             "top_k_chunks": top_k_chunks,
             "top_k_documents": top_k_documents,
             "project": project,
+            "since": since,
+            "until": until,
             "include_full_documents": include_full_documents,
             "max_context_chars": max_context_chars,
         }
@@ -123,6 +128,29 @@ def query_mcp(
             return tool_result_payload(result)
 
     print_json(json.dumps(asyncio.run(run()), default=str))
+
+
+@app.command("eval")
+def evaluate(
+    questions: str = typer.Option(
+        "/eval/questions.yaml", help="YAML file of questions and expected source paths."
+    ),
+    top_k: int = typer.Option(7, min=1, max=25, help="How many documents each question may return."),
+    verbose: bool = typer.Option(False, help="Print the ranked documents for every question."),
+) -> None:
+    """Score retrieval against a question set and report hit rate and mean reciprocal rank."""
+    from product_memory.evaluation import load_cases, run_evaluation
+
+    path = Path(questions)
+    if not path.exists():
+        raise typer.BadParameter(
+            f"{path} does not exist. Copy eval/questions.example.yaml and fill in real questions."
+        )
+    runtime = ready_runtime()
+    report = run_evaluation(runtime.retriever, load_cases(path), top_k)
+    if not verbose:
+        report.pop("results")
+    print_json(json.dumps(report, default=str))
 
 
 if __name__ == "__main__":

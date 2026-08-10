@@ -28,6 +28,7 @@ services:
         condition: service_healthy
     volumes:
       - "${HOST_KNOWLEDGE_DIR:-./knowledge}:/knowledge:ro"
+      - "./eval:/eval:ro"
       - huggingface_cache:/models/huggingface
     ports:
       - "127.0.0.1:${MCP_PORT:-2600}:8080"

@@ -94,6 +94,7 @@ Useful commands:
 | `make reindex` | Rebuild embeddings from stored documents. |
 | `make rebuild` | Re-read every file from disk, then rebuild content, metadata, and embeddings. Use this after an extraction change, such as new OCR or format support. |
 | `make restart` | Restart the MCP service. |
+| `make eval` | Score retrieval against your own question set. |
 | `make clean` | Stop containers without deleting volumes. |
 | `make reset-data` | Delete Docker volumes, including Postgres data and model cache. |
 
@@ -207,25 +208,55 @@ Important defaults from `.env.example`:
 
 ```dotenv
 EMBEDDING_PROVIDER=local_hf
-EMBEDDING_MODEL=intfloat/multilingual-e5-small
+EMBEDDING_MODEL=intfloat/multilingual-e5-base
 SEMANTIC_WEIGHT=0.72
 LEXICAL_WEIGHT=0.13
 RECENCY_WEIGHT=0.15
 RECENCY_HALF_LIFE_DAYS=180
-MIN_RELEVANCE_SCORE=0.70
+MIN_SEMANTIC_SCORE=0.60
 DEFAULT_TOP_K_CHUNKS=10
 DEFAULT_TOP_K_DOCUMENTS=7
 MAX_RETURNED_DOCUMENTS=25
 DEFAULT_CONTEXT_CHARS=24000
 ```
 
-Chunks below `MIN_RELEVANCE_SCORE` are not returned. The default request returns up to 7 matching
+Chunks whose semantic similarity is below `MIN_SEMANTIC_SCORE` are not returned. The floor deliberately
+ignores recency and keyword overlap, so a five-year-old contract clause that answers the question is
+still returned. Ranking still blends all three signals. The default request returns up to 7 matching
 documents; clients may ask for more, capped at 25. Newer documents get a controlled boost but do not
 automatically outrank more relevant older documents.
+
+`retrieve_knowledge`, `search`, and `list_documents` accept optional `since` and `until` ISO dates that
+restrict results to documents effective within that window.
 
 `retrieve_knowledge` returns full top chunks, full top documents unless disabled, and a deterministic
 `context_pack` that preserves source ids. Full document content is capped by
 `MAX_FULL_DOCUMENT_CHARS`.
+
+## Measure Retrieval Quality
+
+Tuning weights or swapping the embedding model is guesswork without a fixed question set. Copy the
+template and replace it with questions you actually ask, together with fragments of the source paths
+that should answer them:
+
+```bash
+cp eval/questions.example.yaml eval/questions.yaml
+make eval
+```
+
+```yaml
+- question: What are the agreed payment terms?
+  expect:
+    - framework-agreement
+```
+
+`make eval` reports `hit_rate` (share of questions whose expected document appears in the top results)
+and `mrr` (mean reciprocal rank, so a document at position 1 scores better than the same document at
+position 5), plus the questions that missed. Use `make eval args='--verbose'` to see the ranked
+documents per question, and `args='--top-k 3'` for a stricter bar.
+
+`eval/questions.yaml` is gitignored because real questions and document names are usually confidential.
+Run it before and after any ranking change and compare the two numbers.
 
 ## Connect Clients
 
@@ -300,7 +331,7 @@ Default local embeddings:
 
 ```dotenv
 EMBEDDING_PROVIDER=local_hf
-EMBEDDING_MODEL=intfloat/multilingual-e5-small
+EMBEDDING_MODEL=intfloat/multilingual-e5-base
 EMBEDDING_REVISION=
 EMBEDDING_DIMENSIONS=
 EMBEDDING_BATCH_SIZE=16

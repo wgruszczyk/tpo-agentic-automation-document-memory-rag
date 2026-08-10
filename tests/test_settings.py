@@ -22,7 +22,7 @@ def test_default_supported_extensions_include_images() -> None:
 
 def test_default_retrieval_limits_are_conservative() -> None:
     settings = Settings(_env_file=None)
-    assert settings.min_relevance_score == 0.70
+    assert settings.min_semantic_score == 0.60
     assert settings.default_top_k_documents == 7
     assert settings.max_returned_documents == 25
 
