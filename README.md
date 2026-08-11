@@ -103,7 +103,7 @@ Useful commands:
 Drop supported files into `knowledge/`, including nested directories:
 
 ```text
-.txt .md .markdown .rst .log .vtt .srt .pdf .docx .pptx .xlsx .msg
+.txt .md .markdown .rst .log .vtt .srt .pdf .docx .pptx .xlsx .msg .eml
 .png .jpg .jpeg .tif .tiff .bmp .webp .gif
 ```
 
@@ -165,8 +165,9 @@ If metadata is missing, the parser uses only reliable signals:
 For Teams/WebVTT transcripts it can also capture title labels, speakers from `<v Speaker Name>`,
 language, duration, source type, and transcript format. PDF, DOCX, PPTX, and XLSX files are indexed
 from extractable text and reliable document properties. Spreadsheets are read sheet by sheet, one row
-per line, capped at 5000 rows per sheet. Outlook `.msg` files are indexed from the plain-text body,
-with subject, sender, recipients, date, and attachment names captured as metadata.
+per line, capped at 5000 rows per sheet. Outlook `.msg` and standard `.eml` messages are indexed from
+the body, with subject, sender, recipients, date, and attachment names captured as metadata. An email
+that only has an HTML body is converted to text, and inline images are read with OCR.
 
 The parser does not infer `project` from free text. Add `project` in front matter when you want
 project filtering.

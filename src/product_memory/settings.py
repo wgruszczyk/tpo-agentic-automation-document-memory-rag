@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     knowledge_dir: Path = Path("/knowledge")
     scan_interval_seconds: float = 30.0
     supported_extensions: str = (
-        ".txt,.md,.markdown,.rst,.log,.vtt,.srt,.pdf,.docx,.pptx,.xlsx,.msg,"
+        ".txt,.md,.markdown,.rst,.log,.vtt,.srt,.pdf,.docx,.pptx,.xlsx,.msg,.eml,"
         ".png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.gif"
     )
 

@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
+from email import policy as email_policy
+from email.message import EmailMessage
+from email.parser import BytesParser
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +52,8 @@ def extract_document(path: Path, ocr: OcrEngine | None = None) -> ExtractedDocum
         extracted = _extract_xlsx(path, collector)
     elif suffix == ".msg":
         extracted = _extract_msg(path)
+    elif suffix == ".eml":
+        extracted = _extract_eml(path, collector)
     elif suffix in IMAGE_EXTENSIONS:
         extracted = _extract_image(path, collector)
     else:
@@ -373,6 +380,89 @@ def _extract_msg(path: Path) -> ExtractedDocument:
             metadata["attachment_names"] = attachment_names
 
     return ExtractedDocument(content=body, metadata=metadata)
+
+
+def _extract_eml(path: Path, collector: _OcrCollector) -> ExtractedDocument:
+    with path.open("rb") as handle:
+        message = BytesParser(policy=email_policy.default).parse(handle)
+
+    metadata: dict[str, Any] = {"source_format": "eml"}
+    if message["subject"]:
+        metadata["title"] = str(message["subject"]).strip()
+    for header, key in (("from", "sender"), ("to", "to"), ("cc", "cc")):
+        value = message[header]
+        if value:
+            metadata[key] = str(value).strip()
+    sent_at = getattr(message["date"], "datetime", None)
+    if sent_at is not None:
+        metadata["date"] = _isoformat(sent_at)
+
+    attachment_names: list[str] = []
+    for part in message.iter_attachments():
+        name = (part.get_filename() or "").strip()
+        if name:
+            attachment_names.append(name)
+        if collector.active and part.get_content_maintype() == "image":
+            payload = part.get_payload(decode=True)
+            if payload and len(payload) <= MAX_EMBEDDED_IMAGE_BYTES:
+                collector.add_bytes(name or "inline image", payload)
+    if attachment_names:
+        metadata["attachment_count"] = len(attachment_names)
+        metadata["attachment_names"] = attachment_names
+
+    collector.apply_metadata(metadata)
+    return ExtractedDocument(content=collector.compose(_eml_body(message)), metadata=metadata)
+
+
+def _eml_body(message: EmailMessage) -> str:
+    part = message.get_body(preferencelist=("plain", "html"))
+    if part is None:
+        return ""
+    try:
+        text = part.get_content()
+    except (LookupError, ValueError):
+        payload = part.get_payload(decode=True) or b""
+        text = payload.decode("utf-8", errors="replace")
+    if part.get_content_subtype() == "html":
+        text = html_to_text(text)
+    return text.strip()
+
+
+def html_to_text(html: str) -> str:
+    parser = _HtmlTextExtractor()
+    parser.feed(html)
+    parser.close()
+    text = "".join(parser.parts)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    return re.sub(r"\n\s*\n\s*\n+", "\n\n", text).strip()
+
+
+class _HtmlTextExtractor(HTMLParser):
+    _SKIP = {"script", "style", "head", "title"}
+    _BREAK = {"br", "p", "div", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "blockquote"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skipping = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIP:
+            self._skipping += 1
+        elif tag in self._BREAK:
+            self.parts.append("\n")
+        elif tag == "td":
+            self.parts.append(" | ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP:
+            self._skipping = max(0, self._skipping - 1)
+        elif tag in self._BREAK:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skipping:
+            self.parts.append(data)
 
 
 def _read_text(path: Path) -> str:

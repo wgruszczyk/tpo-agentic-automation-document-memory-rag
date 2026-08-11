@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from email.message import EmailMessage
 from pathlib import Path
 
 import extract_msg
@@ -246,6 +247,71 @@ def test_extracts_msg_content_and_properties(tmp_path: Path, monkeypatch) -> Non
     assert parsed.metadata["attachment_names"] == ["contract.pdf"]
     assert parsed.metadata["extension"] == ".msg"
     assert parsed.effective_at == datetime(2026, 3, 4, 12, 30, tzinfo=UTC)
+
+
+def _write_eml(path: Path, body: str, content_type: str = "text/plain") -> Path:
+    subtype = content_type.split("/", 1)[1]
+    message = EmailMessage()
+    message["Subject"] = "Renewal terms for Acme"
+    message["From"] = "alice@example.com"
+    message["To"] = "bob@example.com"
+    message["Cc"] = "carol@example.com"
+    message["Date"] = "Wed, 04 Mar 2026 12:30:00 +0000"
+    message.set_content(body, subtype=subtype)
+    path.write_bytes(message.as_bytes())
+    return path
+
+
+def test_extracts_eml_content_and_headers(tmp_path: Path) -> None:
+    path = _write_eml(tmp_path / "renewal.eml", "We agreed on net-30 payment terms.")
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert parsed.title == "Renewal terms for Acme"
+    assert "net-30 payment terms" in parsed.content
+    assert parsed.metadata["source_format"] == "eml"
+    assert parsed.metadata["sender"] == "alice@example.com"
+    assert parsed.metadata["to"] == "bob@example.com"
+    assert parsed.metadata["cc"] == "carol@example.com"
+    assert parsed.metadata["extension"] == ".eml"
+    assert parsed.effective_at == datetime(2026, 3, 4, 12, 30, tzinfo=UTC)
+
+
+def test_reads_an_html_only_email_as_text(tmp_path: Path) -> None:
+    body = (
+        "<html><head><style>p{color:red}</style></head><body>"
+        "<p>Pricing stays at <b>net-30</b>.</p><script>alert(1)</script>"
+        "<table><tr><td>DE</td><td>0.36</td></tr></table>"
+        "</body></html>"
+    )
+    path = _write_eml(tmp_path / "html-only.eml", body, content_type="text/html")
+
+    parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+    assert "Pricing stays at net-30." in parsed.content
+    assert "DE | 0.36" in parsed.content
+    assert "alert(1)" not in parsed.content
+    assert "color:red" not in parsed.content
+
+
+def test_lists_email_attachments_and_reads_inline_images(tmp_path: Path) -> None:
+    picture = _write_png(tmp_path / "chart.png")
+    message = EmailMessage()
+    message["Subject"] = "Quarterly figures"
+    message["Date"] = "Wed, 04 Mar 2026 12:30:00 +0000"
+    message.set_content("See the attached chart.")
+    message.add_attachment(picture.read_bytes(), maintype="image", subtype="png", filename="chart.png")
+    message.add_attachment(b"%PDF-1.4", maintype="application", subtype="pdf", filename="contract.pdf")
+    path = tmp_path / "figures.eml"
+    path.write_bytes(message.as_bytes())
+
+    parser, ocr = _parser_with_ocr(tmp_path, "Revenue grew by 12 percent")
+    parsed = parser.parse(path)
+
+    assert parsed.metadata["attachment_names"] == ["chart.png", "contract.pdf"]
+    assert parsed.metadata["attachment_count"] == 2
+    assert "Revenue grew by 12 percent" in parsed.content
+    assert ocr.calls == 1
 
 
 class _StubOcr:
