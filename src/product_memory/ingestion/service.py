@@ -14,6 +14,7 @@ import numpy as np
 from product_memory.db import Database
 from product_memory.embeddings.base import EmbeddingProvider
 from product_memory.ingestion.chunker import DocumentChunker
+from product_memory.ingestion.extractors import UnreadableDocumentError
 from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError, ParsedDocument
 from product_memory.settings import Settings
 
@@ -145,6 +146,9 @@ class IngestionService:
             except EmptyDocumentError as error:
                 skipped += 1
                 LOGGER.info("Skipping %s", error)
+            except UnreadableDocumentError as error:
+                skipped += 1
+                LOGGER.warning("Skipping unreadable document %s", error)
             except Exception:
                 failed += 1
                 LOGGER.exception("Failed to ingest %s", path)

@@ -3,6 +3,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import extract_msg
+import olefile
 import pytest
 from docx import Document as DocxDocument
 from openpyxl import Workbook
@@ -12,6 +13,7 @@ from pptx import Presentation
 from pptx.oxml.ns import qn
 from pptx.util import Inches
 
+from product_memory.ingestion.extractors import UnreadableDocumentError
 from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError
 from product_memory.settings import Settings
 
@@ -235,7 +237,7 @@ class _FakeMsgMessage:
 
 def test_extracts_msg_content_and_properties(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "renewal.msg"
-    path.write_bytes(b"")
+    path.write_bytes(b"\xd0\xcf\x11\xe0")  # content is irrelevant: the reader is stubbed below
     monkeypatch.setattr(extract_msg, "openMsg", lambda *_args, **_kwargs: _FakeMsgMessage())
 
     parsed = DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
@@ -616,3 +618,51 @@ def _write_simple_pdf(path: Path, title: str, body: str) -> None:
 
 def _escape_pdf_text(value: str) -> str:
     return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def test_empty_file_is_skipped_rather_than_failing_the_reader(tmp_path: Path) -> None:
+    path = tmp_path / "placeholder.docx"
+    path.write_bytes(b"")
+
+    with pytest.raises(EmptyDocumentError):
+        DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+
+class _FakeOleContainer:
+    def __init__(self, streams: list[list[str]]) -> None:
+        self._streams = streams
+
+    def __enter__(self) -> "_FakeOleContainer":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def listdir(self) -> list[list[str]]:
+        return self._streams
+
+
+def _write_ole2_stub(path: Path) -> None:
+    path.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64)
+
+
+def test_password_protected_workbook_is_skipped_with_a_reason(tmp_path: Path, monkeypatch) -> None:
+    # Office encrypts an OOXML file by wrapping it in an OLE2 container, so it is no longer a zip.
+    path = tmp_path / "test users.xlsx"
+    _write_ole2_stub(path)
+    monkeypatch.setattr(
+        olefile, "OleFileIO", lambda *_a, **_k: _FakeOleContainer([["EncryptedPackage"], ["EncryptionInfo"]])
+    )
+
+    with pytest.raises(UnreadableDocumentError, match="password protected"):
+        DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+
+def test_pre_2007_workbook_named_xlsx_is_skipped_with_a_reason(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "old numbers.xlsx"
+    _write_ole2_stub(path)
+    monkeypatch.setattr(olefile, "OleFileIO", lambda *_a, **_k: _FakeOleContainer([["Workbook"]]))
+
+    with pytest.raises(UnreadableDocumentError, match="pre-2007"):
+        DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+

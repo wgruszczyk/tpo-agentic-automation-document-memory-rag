@@ -44,6 +44,9 @@ class DocumentParser:
         self.cache = cache
 
     def parse(self, path: Path, force: bool = False) -> ParsedDocument:
+        if path.stat().st_size == 0:
+            # An empty file is nothing to report on; skip it rather than failing the format reader.
+            raise EmptyDocumentError(f"Document is empty: {path}")
         extracted = self._extract(path, force=force)
         frontmatter, content = self._extract_frontmatter(extracted.content)
         content = content.strip()

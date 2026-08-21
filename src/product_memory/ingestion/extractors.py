@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import extract_msg
+import olefile
 from docx import Document as DocxDocument
 from openpyxl import load_workbook
 from pptx import Presentation
@@ -39,8 +40,33 @@ class ExtractedDocument:
     metadata: dict[str, Any]
 
 
+class UnreadableDocumentError(ValueError):
+    """The file cannot be read at all, for a reason no retry or code change would fix."""
+
+
+_OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_OOXML_EXTENSIONS = {".docx", ".pptx", ".xlsx"}
+
+
+def _ooxml_problem(path: Path) -> str | None:
+    """Explain why an .docx/.pptx/.xlsx is not the OOXML zip its name promises, if so."""
+    with path.open("rb") as handle:
+        if handle.read(len(_OLE2_MAGIC)) != _OLE2_MAGIC:
+            return None
+    try:
+        with olefile.OleFileIO(str(path)) as container:
+            streams = {"/".join(stream) for stream in container.listdir()}
+    except OSError as error:
+        return f"unreadable OLE2 container ({error})"
+    if any(stream.startswith("EncryptedPackage") for stream in streams):
+        return "password protected"
+    return "saved in a pre-2007 Office format under a modern extension"
+
+
 def extract_document(path: Path, ocr: OcrEngine | None = None) -> ExtractedDocument:
     suffix = path.suffix.lower()
+    if suffix in _OOXML_EXTENSIONS and (problem := _ooxml_problem(path)) is not None:
+        raise UnreadableDocumentError(f"{path}: {problem}")
     collector = _OcrCollector(ocr)
     if suffix == ".pdf":
         extracted = _extract_pdf(path, collector)
