@@ -9,6 +9,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XlsxImage
 from PIL import Image
 from pptx import Presentation
+from pptx.oxml.ns import qn
 from pptx.util import Inches
 
 from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError
@@ -456,6 +457,25 @@ def test_deck_images_are_left_alone_when_ocr_is_disabled(tmp_path: Path) -> None
 
     assert parsed.content.strip() == "Quarterly Review"
     assert "ocr_applied" not in parsed.metadata
+
+
+def test_deck_with_a_linked_image_is_still_parsed(tmp_path: Path) -> None:
+    picture_file = _write_png(tmp_path / "chart.png")
+    path = tmp_path / "linked-image.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Linked Image Deck"
+    picture = slide.shapes.add_picture(str(picture_file), Inches(1), Inches(2), Inches(4), Inches(3))
+    # A linked rather than embedded picture carries no r:embed, and python-pptx then
+    # raises ValueError("no embedded image") when .image is read.
+    del picture._element.blipFill.blip.attrib[qn("r:embed")]
+    presentation.save(path)
+    parser, stub = _parser_with_ocr(tmp_path, "Revenue grew 18 percent")
+
+    parsed = parser.parse(path)
+
+    assert "Linked Image Deck" in parsed.content
+    assert stub.calls == 0
 
 
 def test_ocr_stops_after_the_image_budget_is_reached(tmp_path: Path) -> None:

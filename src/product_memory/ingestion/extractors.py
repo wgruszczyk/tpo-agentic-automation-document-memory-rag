@@ -228,6 +228,20 @@ def _extract_docx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
     return ExtractedDocument(content=collector.compose("\n\n".join(parts)), metadata=metadata)
 
 
+def _shape_image_blob(shape: Any) -> bytes | None:
+    """Return a shape's embedded image bytes, or None when it has none.
+
+    python-pptx raises ValueError("no embedded image") for a picture whose image is
+    linked rather than embedded, so a plain getattr() default is not enough: the
+    exception would escape and abort the whole presentation.
+    """
+    try:
+        image = shape.image
+    except (AttributeError, ValueError):
+        return None
+    return None if image is None else image.blob
+
+
 def _extract_pptx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
     presentation = Presentation(str(path))
     parts: list[str] = []
@@ -242,8 +256,10 @@ def _extract_pptx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
             if shape.has_table:
                 rows = [[cell.text.strip() for cell in row.cells] for row in shape.table.rows]
                 slide_parts.extend(_table_lines(rows))
-            if collector.active and getattr(shape, "image", None) is not None:
-                collector.add_bytes(f"slide {number}", shape.image.blob)
+            if collector.active:
+                blob = _shape_image_blob(shape)
+                if blob is not None:
+                    collector.add_bytes(f"slide {number}", blob)
 
         notes = slide.notes_slide.notes_text_frame.text.strip()
         if notes:
