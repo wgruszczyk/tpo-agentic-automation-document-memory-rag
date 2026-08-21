@@ -9,6 +9,7 @@ from product_memory.ingestion.chunker import DocumentChunker
 from product_memory.ingestion.parser import DocumentParser
 from product_memory.ingestion.service import IngestionService
 from product_memory.retrieval.compressor import ContextCompressor
+from product_memory.retrieval.reranker import Reranker
 from product_memory.retrieval.service import Retriever
 from product_memory.settings import Settings, get_settings
 
@@ -24,7 +25,11 @@ class Runtime:
             self.settings, self.db, self.provider, self.parser, self.chunker
         )
         self.retriever = Retriever(
-            self.settings, self.db, self.provider, ContextCompressor()
+            self.settings,
+            self.db,
+            self.provider,
+            ContextCompressor(),
+            Reranker(self.settings) if self.settings.reranker_enabled else None,
         )
 
     def initialize(self) -> None:

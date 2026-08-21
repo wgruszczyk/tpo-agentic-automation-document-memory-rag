@@ -219,6 +219,10 @@ DEFAULT_TOP_K_CHUNKS=10
 DEFAULT_TOP_K_DOCUMENTS=7
 MAX_RETURNED_DOCUMENTS=25
 DEFAULT_CONTEXT_CHARS=24000
+RERANKER_ENABLED=true
+RERANKER_MODEL=BAAI/bge-reranker-base
+CANDIDATE_POOL_CHUNKS=40
+CANDIDATE_POOL_PER_SIGNAL=50
 ```
 
 Chunks whose semantic similarity is below `MIN_SEMANTIC_SCORE` are not returned. The floor deliberately
@@ -226,6 +230,23 @@ ignores recency and keyword overlap, so a five-year-old contract clause that ans
 still returned. Ranking still blends all three signals. The default request returns up to 7 matching
 documents; clients may ask for more, capped at 25. Newer documents get a controlled boost but do not
 automatically outrank more relevant older documents.
+
+### Reranking
+
+Search compares the question against a summary of each passage written before the question existed, so
+a passage that merely discusses the subject can outrank the one that answers it. Reranking reads the
+question and the passage together, which is far too slow to search with but affordable over a
+shortlist. So retrieval collects `CANDIDATE_POOL_CHUNKS` candidates, plus each signal's own top
+`CANDIDATE_POOL_PER_SIGNAL` so a passage only one signal likes still gets considered, and the
+shortlist is then read again and reordered.
+
+The reranker gets a vote, not a veto: its order is fused with the retrieval order, weighted by
+`RERANKER_WEIGHT`. Letting it decide alone measurably loses questions that name a document rather than
+describe its contents, because it never sees titles or paths the way the search stage does.
+
+Reranking costs seconds per query and downloads roughly 1 GB on first use. Set `RERANKER_ENABLED=false`
+where that is the wrong trade; everything else keeps working. Use `product-memory eval` to decide,
+rather than assuming either way.
 
 `retrieve_knowledge`, `search`, and `list_documents` accept optional `since` and `until` ISO dates that
 restrict results to documents effective within that window.

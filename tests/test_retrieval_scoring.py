@@ -247,6 +247,8 @@ class CapturingRetriever(Retriever):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.document_limit: int | None = None
+        self.chunk_limit: int | None = None
+        self.per_signal: int | None = None
 
     def _ready_profile(self) -> dict[str, Any]:
         return {"status": "ready", "fingerprint": "profile"}
@@ -259,7 +261,10 @@ class CapturingRetriever(Retriever):
         project: str | None,
         since: datetime | None = None,
         until: datetime | None = None,
+        per_signal: int = 0,
     ) -> list[ChunkResult]:
+        self.chunk_limit = limit
+        self.per_signal = per_signal
         return []
 
     def _documents_for_chunks(self, chunks: list[ChunkResult], limit: int, include_content: bool):
@@ -270,3 +275,121 @@ class CapturingRetriever(Retriever):
 class FakeCompressor:
     def pack(self, chunks: list[ChunkResult], max_chars: int) -> str:
         return ""
+
+
+class StubReranker:
+    """Orders by a caller-supplied key so a test can state the reranked order outright."""
+
+    def __init__(self, order: list[str] | None = None) -> None:
+        self.order = order or []
+        self.seen: list[ChunkResult] = []
+        self.query: str | None = None
+
+    def rerank(self, query: str, chunks: list[ChunkResult], limit: int) -> list[ChunkResult]:
+        self.query = query
+        self.seen = list(chunks)
+        ranked = sorted(
+            chunks,
+            key=lambda chunk: self.order.index(chunk.id) if chunk.id in self.order else len(self.order),
+        )
+        return ranked[:limit]
+
+
+def _chunk(chunk_id: str, document_id: str) -> ChunkResult:
+    return ChunkResult(
+        id=chunk_id,
+        document_id=document_id,
+        document_title=f"doc {document_id}",
+        source_path=f"/knowledge/{document_id}.md",
+        chunk_index=0,
+        content=f"content {chunk_id}",
+        start_char=0,
+        end_char=10,
+        effective_at=datetime(2026, 1, 1, tzinfo=UTC),
+        semantic_score=0.8,
+        lexical_score=0.1,
+        recency_score=0.9,
+        score=0.5,
+    )
+
+
+class PoolRetriever(CapturingRetriever):
+    """Returns a fixed candidate pool so the reranker's effect on the result is observable."""
+
+    def __init__(self, pool: list[ChunkResult], *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.pool = pool
+        self.documents_seen: list[ChunkResult] = []
+
+    def _search_chunks(self, *args: Any, **kwargs: Any) -> list[ChunkResult]:
+        super()._search_chunks(*args, **kwargs)
+        return list(self.pool)
+
+    def _documents_for_chunks(self, chunks: list[ChunkResult], limit: int, include_content: bool):
+        self.documents_seen = list(chunks)
+        return super()._documents_for_chunks(chunks, limit, include_content)
+
+
+def test_retrieve_searches_deeper_than_it_returns_when_reranking() -> None:
+    retriever = PoolRetriever(
+        [],
+        settings=Settings(candidate_pool_chunks=120, candidate_pool_per_signal=40, _env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+        reranker=StubReranker(),  # type: ignore[arg-type]
+    )
+
+    retriever.retrieve("payment retries", top_k_chunks=5)
+
+    assert retriever.chunk_limit == 120
+    assert retriever.per_signal == 40
+
+
+def test_retrieve_keeps_the_pool_shallow_when_not_reranking() -> None:
+    retriever = PoolRetriever(
+        [],
+        settings=Settings(candidate_pool_chunks=120, candidate_pool_per_signal=40, _env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+    )
+
+    retriever.retrieve("payment retries", top_k_chunks=5)
+
+    assert retriever.chunk_limit == 5
+    # Widening the pool without reranking only buys noise, so the union stays switched off.
+    assert retriever.per_signal == 0
+
+
+def test_retrieve_returns_the_reranked_order_not_the_retrieved_one() -> None:
+    pool = [_chunk("a", "doc-1"), _chunk("b", "doc-2"), _chunk("c", "doc-3")]
+    retriever = PoolRetriever(
+        pool,
+        settings=Settings(_env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+        reranker=StubReranker(order=["c", "a", "b"]),  # type: ignore[arg-type]
+    )
+
+    response = retriever.retrieve("payment retries", top_k_chunks=2)
+
+    assert [chunk.id for chunk in response.chunks] == ["c", "a"]
+
+
+def test_retrieve_reads_documents_off_the_whole_pool_not_the_returned_chunks() -> None:
+    pool = [_chunk("a", "doc-1"), _chunk("b", "doc-2"), _chunk("c", "doc-3")]
+    retriever = PoolRetriever(
+        pool,
+        settings=Settings(_env_file=None),
+        db=None,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=FakeCompressor(),  # type: ignore[arg-type]
+        reranker=StubReranker(order=["a", "b", "c"]),  # type: ignore[arg-type]
+    )
+
+    retriever.retrieve("payment retries", top_k_chunks=1, top_k_documents=3)
+
+    # Asking for more documents than chunks must not silently return fewer.
+    assert [chunk.id for chunk in retriever.documents_seen] == ["a", "b", "c"]

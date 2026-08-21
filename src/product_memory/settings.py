@@ -63,6 +63,28 @@ class Settings(BaseSettings):
     default_context_chars: int = Field(default=24000, ge=2000, le=250000)
     max_full_document_chars: int = Field(default=120000, ge=1000, le=2_000_000)
 
+    # How many chunks are considered before deciding what to return. Kept well above the number
+    # returned because the two questions are different: retrieval only has to get the right chunk
+    # into the room, reranking decides where it stands. Searching this deep without reranking
+    # would only add noise, so the pool and the reranker belong together.
+    candidate_pool_chunks: int = Field(default=40, ge=1, le=1000)
+
+    # Guarantees the pool holds each signal's own favourites, not just the ones the fused order
+    # liked. A passage nobody else votes for can still be the only one that names the answer.
+    candidate_pool_per_signal: int = Field(default=50, ge=0, le=1000)
+
+    reranker_enabled: bool = True
+    # Multilingual, and small enough to read a shortlist on a CPU. The larger v2-m3 scores better
+    # and takes several times as long; worth swapping in where latency is not the binding cost.
+    reranker_model: str = "BAAI/bge-reranker-base"
+    reranker_max_length: int = Field(default=512, ge=64, le=2048)
+    reranker_threads: int = Field(default=8, ge=1)
+    # Fused against the shortlist it was given, so retrieval keeps a say. Much smaller than
+    # rrf_k because it fuses two orderings of a few hundred rows, not of the whole index.
+    reranker_rrf_k: float = Field(default=20, gt=0)
+    reranker_weight: float = Field(default=0.5, ge=0, le=1)
+    reranker_batch_size: int = Field(default=16, ge=1, le=256)
+
     mcp_allowed_hosts: str = "localhost,localhost:*,127.0.0.1,127.0.0.1:*,[::1],[::1]:*"
     log_level: str = "INFO"
 

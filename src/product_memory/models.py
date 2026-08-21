@@ -21,6 +21,7 @@ class ChunkResult(BaseModel):
     lexical_score: float
     recency_score: float
     score: float
+    rerank_score: float | None = None
 
 
 class DocumentResult(BaseModel):

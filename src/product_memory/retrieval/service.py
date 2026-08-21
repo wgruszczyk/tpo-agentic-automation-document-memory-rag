@@ -20,6 +20,7 @@ from product_memory.models import (
     SearchResponse,
 )
 from product_memory.retrieval.compressor import ContextCompressor
+from product_memory.retrieval.reranker import Reranker
 from product_memory.settings import Settings
 
 # Words that say how a question is phrased rather than what it is about. A question carries a
@@ -79,11 +80,13 @@ class Retriever:
         db: Database,
         provider: EmbeddingProvider,
         compressor: ContextCompressor,
+        reranker: Reranker | None = None,
     ):
         self.settings = settings
         self.db = db
         self.provider = provider
         self.compressor = compressor
+        self.reranker = reranker
 
     def retrieve(
         self,
@@ -114,16 +117,26 @@ class Retriever:
             max(max_context_chars or self.settings.default_context_chars, 2000),
             250000,
         )
-        chunks = self._search_chunks(
+        # Retrieval only has to get the right chunk into the room; the reranker decides where it
+        # stands. So search deeper than we return, and let every signal put its own favourites in
+        # the pool rather than only the ones the fused order already liked.
+        reranking = self.reranker is not None
+        candidates = self._search_chunks(
             query=query,
             profile_hash=profile["fingerprint"],
-            limit=chunk_limit,
+            limit=max(chunk_limit, self.settings.candidate_pool_chunks) if reranking else chunk_limit,
             project=project,
             since=since_at,
             until=until_at,
+            per_signal=self.settings.candidate_pool_per_signal if reranking else 0,
         )
+        if self.reranker is not None:
+            candidates = self.reranker.rerank(query, candidates, limit=len(candidates))
+        chunks = candidates[:chunk_limit]
+        # Documents are read off the whole pool, not just what is returned. Otherwise asking for
+        # more documents than chunks silently returns fewer.
         documents = self._documents_for_chunks(
-            chunks,
+            candidates,
             limit=document_limit,
             include_content=include_full_documents,
         )
@@ -304,6 +317,7 @@ class Retriever:
         project: str | None,
         since: datetime | None = None,
         until: datetime | None = None,
+        per_signal: int = 0,
     ) -> list[ChunkResult]:
         query_embedding = np.asarray(self.provider.embed_query(query), dtype=np.float32)
         params: dict[str, Any] = {
@@ -311,6 +325,7 @@ class Retriever:
             "query": query,
             "profile_hash": profile_hash,
             "limit": limit,
+            "per_signal": per_signal,
             "semantic_weight": self.settings.semantic_weight,
             "lexical_weight": self.settings.lexical_weight,
             "recency_weight": self.settings.recency_weight,
@@ -409,11 +424,17 @@ class Retriever:
                     (%(lexical_weight)s / (%(rrf_k)s + lexical_rank)) +
                     (%(recency_weight)s / (%(rrf_k)s + recency_rank)) AS score
                 FROM ranked
+            ),
+            pooled AS (
+                SELECT *, rank() OVER (ORDER BY score DESC, effective_at DESC) AS fused_rank
+                FROM fused
             )
             SELECT *
-            FROM fused
+            FROM pooled
+            WHERE fused_rank <= %(limit)s
+               OR semantic_rank <= %(per_signal)s
+               OR lexical_rank <= %(per_signal)s
             ORDER BY score DESC, effective_at DESC
-            LIMIT %(limit)s
         """
         with self.db.connection() as conn:
             rows = conn.execute(sql, params).fetchall()
