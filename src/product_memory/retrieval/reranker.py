@@ -10,6 +10,11 @@ from product_memory.settings import Settings
 LOGGER = logging.getLogger(__name__)
 
 
+def _positions(chunks: list[ChunkResult], key) -> dict[str, int]:  # type: ignore[no-untyped-def]
+    ranked = sorted(chunks, key=key, reverse=True)
+    return {chunk.id: position for position, chunk in enumerate(ranked)}
+
+
 class Reranker:
     """Reads each candidate together with the question and scores how well it answers it.
 
@@ -106,12 +111,22 @@ class Reranker:
         # that were already fused to build this shortlist.
         rerank_position = {chunk.id: position for position, (chunk, _) in enumerate(ordered)}
         rerank_score = {chunk.id: score for chunk, score in ordered}
+        # Retrieval's opinion is the best case any one signal made, not the blended order. A
+        # passage can be the single strongest keyword match in the index and still land deep in
+        # the blend; it reaches this shortlist on that signal's insistence, so judging it again
+        # by the blend that buried it would just repeat the mistake that hid it.
+        by_semantic = _positions(chunks, lambda chunk: chunk.semantic_score)
+        by_lexical = _positions(chunks, lambda chunk: chunk.lexical_score)
+        retrieval_position = {
+            chunk.id: min(position, by_semantic[chunk.id], by_lexical[chunk.id])
+            for position, chunk in enumerate(chunks)
+        }
         k = self.settings.reranker_rrf_k
         fused = sorted(
             enumerate(chunks),
             key=lambda pair: (
                 self.settings.reranker_weight / (k + rerank_position[pair[1].id])
-                + (1 - self.settings.reranker_weight) / (k + pair[0])
+                + (1 - self.settings.reranker_weight) / (k + retrieval_position[pair[1].id])
             ),
             reverse=True,
         )

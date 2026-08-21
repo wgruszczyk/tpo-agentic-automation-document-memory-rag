@@ -117,3 +117,29 @@ def test_rerank_falls_back_to_retrieval_order_when_the_model_fails() -> None:
 
     # Losing the model should cost quality, not availability.
     assert [chunk.id for chunk in ranked] == ["a"]
+
+
+def _scored(chunk_id: str, semantic: float, lexical: float, content: str) -> ChunkResult:
+    chunk = _chunk(chunk_id, content=content)
+    return chunk.model_copy(update={"semantic_score": semantic, "lexical_score": lexical})
+
+
+def test_rerank_judges_a_candidate_by_the_best_case_retrieval_made_for_it() -> None:
+    reranker, _ = _reranker(
+        {"first": 0.1, "second": 0.0, "third": 0.9},
+        reranker_weight=0.5,
+        reranker_rrf_k=20,
+    )
+    # "c" sits last in the blended order but is the strongest keyword match of the three, which is
+    # how it reached the shortlist at all. The model then ranks it top.
+    chunks = [
+        _scored("a", semantic=0.9, lexical=0.1, content="first"),
+        _scored("b", semantic=0.8, lexical=0.2, content="second"),
+        _scored("c", semantic=0.7, lexical=0.9, content="third"),
+    ]
+
+    ranked = reranker.rerank("a question", chunks, limit=3)
+
+    # Scoring it by the blend that buried it would put "a" on top and repeat the mistake that hid
+    # the answer in the first place.
+    assert [chunk.id for chunk in ranked] == ["c", "a", "b"]

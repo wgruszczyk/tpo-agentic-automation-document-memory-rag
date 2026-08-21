@@ -244,6 +244,11 @@ The reranker gets a vote, not a veto: its order is fused with the retrieval orde
 `RERANKER_WEIGHT`. Letting it decide alone measurably loses questions that name a document rather than
 describe its contents, because it never sees titles or paths the way the search stage does.
 
+Retrieval's side of that vote is the best case any single signal made for a candidate, not the blended
+score. A passage can be the strongest keyword match in the index and still sit deep in the blend; it
+reaches the shortlist on that one signal's insistence, so judging it again by the blend that buried it
+would only repeat the mistake that hid it.
+
 Reranking costs seconds per query and downloads roughly 1 GB on first use. Set `RERANKER_ENABLED=false`
 where that is the wrong trade; everything else keeps working. Use `product-memory eval` to decide,
 rather than assuming either way.
