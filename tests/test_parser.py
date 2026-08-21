@@ -336,8 +336,8 @@ class _StubOcr:
         return self.text
 
 
-def _write_png(path: Path, size: tuple[int, int] = (240, 120)) -> Path:
-    Image.new("RGB", size, color="white").save(path)
+def _write_png(path: Path, size: tuple[int, int] = (240, 120), color: str = "white") -> Path:
+    Image.new("RGB", size, color=color).save(path)
     return path
 
 
@@ -481,12 +481,16 @@ def test_deck_with_a_linked_image_is_still_parsed(tmp_path: Path) -> None:
 
 
 def test_ocr_stops_after_the_image_budget_is_reached(tmp_path: Path) -> None:
-    picture = _write_png(tmp_path / "chart.png")
+    # Distinct pictures, because identical bytes are read once however often they repeat.
+    pictures = [
+        _write_png(tmp_path / f"chart-{index}.png", color=color)
+        for index, color in enumerate(("white", "red", "blue"))
+    ]
     path = tmp_path / "many-images.pptx"
     presentation = Presentation()
     slide = presentation.slides.add_slide(presentation.slide_layouts[5])
     slide.shapes.title.text = "Many Images"
-    for offset in range(3):
+    for offset, picture in enumerate(pictures):
         slide.shapes.add_picture(str(picture), Inches(1), Inches(1 + offset), Inches(2), Inches(1))
     presentation.save(path)
 
@@ -665,4 +669,44 @@ def test_pre_2007_workbook_named_xlsx_is_skipped_with_a_reason(tmp_path: Path, m
 
     with pytest.raises(UnreadableDocumentError, match="pre-2007"):
         DocumentParser(Settings(knowledge_dir=tmp_path)).parse(path)
+
+
+def test_text_and_pictures_inside_a_group_are_extracted(tmp_path: Path) -> None:
+    # Iterating a slide yields only top-level shapes, so a grouped diagram reads as empty.
+    picture_file = _write_png(tmp_path / "diagram.png")
+    path = tmp_path / "grouped.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Architecture"
+    group = slide.shapes.add_group_shape()
+    textbox = group.shapes.add_textbox(Inches(1), Inches(2), Inches(4), Inches(1))
+    textbox.text_frame.text = "Checkout calls the pricing service"
+    group.shapes.add_picture(str(picture_file), Inches(1), Inches(3), Inches(3), Inches(2))
+    presentation.save(path)
+    parser, stub = _parser_with_ocr(tmp_path, "Latency budget 200 ms")
+
+    parsed = parser.parse(path)
+
+    assert "Checkout calls the pricing service" in parsed.content
+    assert "Latency budget 200 ms" in parsed.content
+    assert stub.calls == 1
+
+
+def test_an_image_repeated_across_slides_is_read_once(tmp_path: Path) -> None:
+    logo = _write_png(tmp_path / "logo.png")
+    path = tmp_path / "repeated-logo.pptx"
+    presentation = Presentation()
+    for index in range(3):
+        slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+        slide.shapes.title.text = f"Slide {index}"
+        slide.shapes.add_picture(str(logo), Inches(1), Inches(2), Inches(2), Inches(1))
+    presentation.save(path)
+    parser, stub = _parser_with_ocr(tmp_path, "Vendor logo")
+
+    parsed = parser.parse(path)
+
+    assert stub.calls == 1
+    assert parsed.metadata["embedded_image_count"] == 3
+    assert parsed.metadata["repeated_image_count"] == 2
+    assert parsed.content.count("Vendor logo") == 1
 

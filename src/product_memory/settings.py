@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     ocr_max_images_per_document: int = Field(default=100, ge=1, le=2000)
     ocr_min_image_pixels: int = Field(default=10_000, ge=0)
     ocr_min_characters: int = Field(default=12, ge=1)
+    ocr_min_words: int = Field(default=6, ge=1)
+    ocr_min_word_confidence: int = Field(default=60, ge=0, le=100)
     ocr_timeout_seconds: float = Field(default=30.0, gt=0)
 
     embedding_provider: Literal["local_hf", "openai"] = "local_hf"

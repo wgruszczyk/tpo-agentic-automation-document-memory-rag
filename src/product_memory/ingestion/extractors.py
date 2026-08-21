@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import re
@@ -19,6 +20,7 @@ import olefile
 from docx import Document as DocxDocument
 from openpyxl import load_workbook
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pypdf import PdfReader
 
 from product_memory.ingestion.ocr import OcrEngine
@@ -93,9 +95,11 @@ class _OcrCollector:
     def __init__(self, ocr: OcrEngine | None):
         self._ocr = ocr
         self._budget = ocr.settings.ocr_max_images_per_document if ocr else 0
+        self._seen_digests: set[str] = set()
         self.sections: list[str] = []
         self.images_seen = 0
         self.images_read = 0
+        self.duplicates_skipped = 0
 
     @property
     def active(self) -> bool:
@@ -114,6 +118,13 @@ class _OcrCollector:
             self.sections.append(f"[Image text: {label}]\n{text}")
 
     def add_bytes(self, label: str, data: bytes) -> None:
+        digest = hashlib.sha256(data).hexdigest()
+        if digest in self._seen_digests:
+            # Logos and backgrounds repeat on every slide; reading one once is enough.
+            self.images_seen += 1
+            self.duplicates_skipped += 1
+            return
+        self._seen_digests.add(digest)
         image = _open_image_bytes(data, label)
         if image is None:
             return
@@ -130,6 +141,8 @@ class _OcrCollector:
         metadata["ocr_applied"] = bool(self.images_read)
         if self.images_read:
             metadata["ocr_image_count"] = self.images_read
+        if self.duplicates_skipped:
+            metadata["repeated_image_count"] = self.duplicates_skipped
 
 
 def _open_image_bytes(data: bytes, label: str) -> Any:
@@ -268,13 +281,30 @@ def _shape_image_blob(shape: Any) -> bytes | None:
     return None if image is None else image.blob
 
 
+def _iter_shapes(shapes: Any) -> Iterator[Any]:
+    """Yield every shape on a slide, descending into groups.
+
+    Iterating a slide only yields top-level shapes, so anything the author grouped,
+    which in practice is most diagrams, would otherwise contribute no text and no image.
+    """
+    for shape in shapes:
+        try:
+            is_group = shape.shape_type == MSO_SHAPE_TYPE.GROUP
+        except Exception:  # a shape type python-pptx cannot resolve is still worth reading
+            is_group = False
+        if is_group:
+            yield from _iter_shapes(shape.shapes)
+        else:
+            yield shape
+
+
 def _extract_pptx(path: Path, collector: _OcrCollector) -> ExtractedDocument:
     presentation = Presentation(str(path))
     parts: list[str] = []
 
     for number, slide in enumerate(presentation.slides, start=1):
         slide_parts: list[str] = []
-        for shape in slide.shapes:
+        for shape in _iter_shapes(slide.shapes):
             if shape.has_text_frame:
                 text = shape.text.strip()
                 if text:
