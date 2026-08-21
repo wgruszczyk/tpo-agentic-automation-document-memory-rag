@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
@@ -20,6 +21,42 @@ from product_memory.models import (
 )
 from product_memory.retrieval.compressor import ContextCompressor
 from product_memory.settings import Settings
+
+# Words that say how a question is phrased rather than what it is about. A question carries a
+# handful of names and nouns worth matching on; everything else is grammar, and counting it
+# drags the score of every document towards the same value.
+_QUESTION_WORDS = frozenset(
+    {
+        # English
+        "the", "and", "for", "are", "was", "were", "who", "what", "when", "where", "which",
+        "why", "how", "does", "did", "has", "have", "had", "can", "could", "would", "should",
+        "his", "her", "its", "our", "their", "this", "that", "these", "those", "there",
+        "from", "with", "about", "into", "over", "any", "all", "you", "your", "not", "but",
+        "please",
+        # Polish
+        "jest", "sie", "czy", "jak", "kto", "gdzie", "kiedy", "dlaczego", "ktory", "ktora",
+        "ktore", "oraz", "dla", "nie", "tak", "przez", "jaki", "jaka", "jakie", "byl", "byla",
+        # German
+        "der", "die", "das", "und", "wer", "wie", "wann", "warum", "welche", "welcher",
+        "ist", "sind", "war", "waren", "ein", "eine", "den", "dem", "des", "von", "mit", "fur",
+    }
+)
+
+_MIN_TERM_LENGTH = 3
+_MAX_QUERY_TERMS = 12
+
+
+def query_terms(query: str) -> list[str]:
+    """The parts of a query worth looking for literally, in the order they were written."""
+    terms: list[str] = []
+    for raw in re.split(r"[^\w]+", query.lower(), flags=re.UNICODE):
+        term = raw.strip("_")
+        if len(term) < _MIN_TERM_LENGTH or term in _QUESTION_WORDS or term in terms:
+            continue
+        terms.append(term)
+        if len(terms) == _MAX_QUERY_TERMS:
+            break
+    return terms
 
 
 def parse_boundary(value: str | datetime | None, label: str) -> datetime | None:
@@ -277,6 +314,8 @@ class Retriever:
             "semantic_weight": self.settings.semantic_weight,
             "lexical_weight": self.settings.lexical_weight,
             "recency_weight": self.settings.recency_weight,
+            "rrf_k": self.settings.rrf_k,
+            "terms": query_terms(query),
             "half_life": self.settings.recency_half_life_days,
             "min_semantic_score": self.settings.min_semantic_score,
             "project": project,
@@ -292,7 +331,8 @@ class Retriever:
             WITH query_input AS (
                 SELECT
                     websearch_to_tsquery('simple', %(query)s) AS text_query,
-                    lower(%(query)s) AS raw_query
+                    lower(%(query)s) AS raw_query,
+                    %(terms)s::text[] AS terms
             ),
             scored AS (
                 SELECT
@@ -321,14 +361,14 @@ class Retriever:
                         ) +
                         LEAST(
                             1.0,
-                            (CASE WHEN position(q.raw_query in lower(coalesce(d.title, ''))) > 0
-                                THEN 0.45 ELSE 0.0 END) +
-                            (CASE WHEN position(q.raw_query in lower(coalesce(d.source_path, ''))) > 0
-                                THEN 0.35 ELSE 0.0 END) +
-                            (CASE WHEN position(q.raw_query in lower(coalesce(d.metadata::text, ''))) > 0
-                                THEN 0.30 ELSE 0.0 END) +
-                            (CASE WHEN position(q.raw_query in lower(coalesce(c.content, ''))) > 0
-                                THEN 0.55 ELSE 0.0 END)
+                            coalesce((
+                                SELECT
+                                    0.45 * avg((position(t in lower(coalesce(d.title, ''))) > 0)::int)
+                                  + 0.35 * avg((position(t in lower(coalesce(d.source_path, ''))) > 0)::int)
+                                  + 0.30 * avg((position(t in lower(coalesce(d.metadata::text,''))) > 0)::int)
+                                  + 0.55 * avg((position(t in lower(coalesce(c.content, ''))) > 0)::int)
+                                FROM unnest(q.terms) AS t
+                            ), 0.0)
                         ) +
                         (
                             GREATEST(
@@ -357,14 +397,21 @@ class Retriever:
             ),
             ranked AS (
                 SELECT *,
-                    (%(semantic_weight)s * semantic_score) +
-                    (%(lexical_weight)s * lexical_score) +
-                    (%(recency_weight)s * recency_score) AS score
+                    rank() OVER (ORDER BY semantic_score DESC) AS semantic_rank,
+                    rank() OVER (ORDER BY lexical_score DESC) AS lexical_rank,
+                    rank() OVER (ORDER BY recency_score DESC) AS recency_rank
                 FROM scored
+                WHERE semantic_score >= %(min_semantic_score)s
+            ),
+            fused AS (
+                SELECT *,
+                    (%(semantic_weight)s / (%(rrf_k)s + semantic_rank)) +
+                    (%(lexical_weight)s / (%(rrf_k)s + lexical_rank)) +
+                    (%(recency_weight)s / (%(rrf_k)s + recency_rank)) AS score
+                FROM ranked
             )
             SELECT *
-            FROM ranked
-            WHERE semantic_score >= %(min_semantic_score)s
+            FROM fused
             ORDER BY score DESC, effective_at DESC
             LIMIT %(limit)s
         """

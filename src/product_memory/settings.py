@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     recency_weight: float = Field(default=0.15, ge=0)
     recency_half_life_days: float = Field(default=180, gt=0)
 
+    # The three signals are read on incompatible scales: cosine distance fills the top of its
+    # range while a text rank sits near the bottom of its own, so adding them lets whichever
+    # scale happens to be wider decide the order. Fusing positions instead of values keeps each
+    # signal's opinion and none of its units. A large k keeps the fusion gentle, so a single
+    # signal that is merely confident cannot overrule the other two that disagree.
+    rrf_k: float = Field(default=150, gt=0)
+
     # Gates on meaning alone. Blending recency in here used to hide old documents that still answer
     # the question, which is the wrong call for signed contracts.
     min_semantic_score: float = Field(default=0.60, ge=0, le=1)
