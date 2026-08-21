@@ -71,13 +71,17 @@ class Settings(BaseSettings):
 
     # Guarantees the pool holds each signal's own favourites, not just the ones the fused order
     # liked. A passage nobody else votes for can still be the only one that names the answer.
-    candidate_pool_per_signal: int = Field(default=50, ge=0, le=1000)
+    candidate_pool_per_signal: int = Field(default=25, ge=0, le=1000)
 
     reranker_enabled: bool = True
     # Multilingual, and small enough to read a shortlist on a CPU. The larger v2-m3 scores better
     # and takes several times as long; worth swapping in where latency is not the binding cost.
     reranker_model: str = "BAAI/bge-reranker-base"
-    reranker_max_length: int = Field(default=512, ge=64, le=2048)
+    # Deliberately far below the chunk size. A reranker averages relevance over what it is
+    # given, so feeding it a whole chunk dilutes the few lines that answer the question. Cutting
+    # it short scored better at every step down to this point, and costs less; below it,
+    # truncation starts removing answers rather than padding.
+    reranker_max_length: int = Field(default=192, ge=64, le=2048)
     reranker_threads: int = Field(default=8, ge=1)
     # Fused against the shortlist it was given, so retrieval keeps a say. Much smaller than
     # rrf_k because it fuses two orderings of a few hundred rows, not of the whole index.

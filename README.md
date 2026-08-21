@@ -222,7 +222,7 @@ DEFAULT_CONTEXT_CHARS=24000
 RERANKER_ENABLED=true
 RERANKER_MODEL=BAAI/bge-reranker-base
 CANDIDATE_POOL_CHUNKS=40
-CANDIDATE_POOL_PER_SIGNAL=50
+CANDIDATE_POOL_PER_SIGNAL=25
 ```
 
 Chunks whose semantic similarity is below `MIN_SEMANTIC_SCORE` are not returned. The floor deliberately
@@ -247,6 +247,13 @@ describe its contents, because it never sees titles or paths the way the search 
 Reranking costs seconds per query and downloads roughly 1 GB on first use. Set `RERANKER_ENABLED=false`
 where that is the wrong trade; everything else keeps working. Use `product-memory eval` to decide,
 rather than assuming either way.
+
+`RERANKER_MAX_LENGTH` is worth tuning against your own corpus. It is much shorter than a chunk on
+purpose: a reranker averages relevance over everything it is shown, so handing it a whole chunk buries
+the few lines that answer the question. Cutting it short scored better *and* faster here, until the
+point where truncation began removing answers instead of padding. Where that point falls depends on
+how your documents are written, and on their language, since a multilingual tokenizer spends more
+tokens per word outside English.
 
 `retrieve_knowledge`, `search`, and `list_documents` accept optional `since` and `until` ISO dates that
 restrict results to documents effective within that window.
