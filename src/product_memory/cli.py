@@ -70,6 +70,13 @@ def status() -> None:
     print_json(json.dumps(runtime.retriever.status(), default=str))
 
 
+@app.command("skipped")
+def skipped() -> None:
+    """List the knowledge files that carry no indexable text, with the reason for each."""
+    runtime = ready_runtime()
+    print_json(json.dumps(runtime.ingestion.skipped_documents(), default=str))
+
+
 @app.command("smoke-test")
 def smoke_test(url: str = "http://127.0.0.1:2600/mcp") -> None:
     """Connect through MCP, list tools, and execute a real retrieval against the sample knowledge."""

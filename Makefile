@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
+.PHONY: start stop restart logs status skipped ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -24,6 +24,10 @@ logs:
 
 status:
 	$(COMPOSE) exec product-memory product-memory status
+
+# Files that hold no indexable text, and why each one was left out.
+skipped:
+	$(COMPOSE) exec product-memory product-memory skipped
 
 ingest:
 	$(COMPOSE) exec product-memory product-memory ingest-once

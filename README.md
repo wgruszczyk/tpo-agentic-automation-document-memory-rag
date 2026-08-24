@@ -91,6 +91,7 @@ Useful commands:
 |---|---|
 | `make logs` | Follow service logs. |
 | `make ingest` | Run one scan now. |
+| `make skipped` | List files that hold no indexable text, with the reason each was left out. |
 | `make reindex` | Rebuild embeddings from stored documents. |
 | `make rebuild` | Re-read every file from disk, then rebuild content, metadata, and embeddings. Use this after an extraction change, such as new OCR or format support. |
 | `make restart` | Restart the MCP service. |

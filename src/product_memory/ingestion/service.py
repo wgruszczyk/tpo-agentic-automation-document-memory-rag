@@ -20,10 +20,16 @@ from product_memory.settings import Settings
 
 LOGGER = logging.getLogger(__name__)
 INDEX_STATE_KEY = "index_profile"
+SKIPPED_STATE_KEY = "skipped_documents"
 INDEX_LOCK = "product_memory_index_rebuild"
 PIPELINE_VERSION = "1"
 EXAMPLE_KNOWLEDGE_PATH = "example-knowledge.md"
 KNOWLEDGE_README_PATHS = {"README.md", ".README.md"}
+
+
+def _skip_reason(error: Exception, path: Path) -> str:
+    reason = str(error).replace(str(path), "").strip().strip(":").strip()
+    return reason or type(error).__name__
 
 
 class IngestionService:
@@ -138,20 +144,22 @@ class IngestionService:
         root.mkdir(parents=True, exist_ok=True)
         paths = self._discover_paths(root)
         parsed_documents: list[ParsedDocument] = []
-        added = updated = unchanged = failed = skipped = 0
+        added = updated = unchanged = failed = 0
+        skipped_documents: dict[str, str] = {}
 
         for path in paths:
             try:
                 parsed_documents.append(self.parser.parse(path, force=force))
-            except EmptyDocumentError as error:
-                skipped += 1
-                LOGGER.info("Skipping %s", error)
-            except UnreadableDocumentError as error:
-                skipped += 1
-                LOGGER.warning("Skipping unreadable document %s", error)
+            except (EmptyDocumentError, UnreadableDocumentError) as error:
+                # A knowledge folder holds pictures, empty files and locked workbooks that will
+                # never be indexable. Naming each one on every scan buries everything else, so
+                # they are kept as a list and only reported when the list itself changes.
+                skipped_documents[self._relative_source_path(root, path)] = _skip_reason(error, path)
             except Exception:
                 failed += 1
                 LOGGER.exception("Failed to ingest %s", path)
+
+        self._record_skipped(skipped_documents)
 
         unique_documents, duplicates = self._deduplicate_documents(parsed_documents)
         found_paths = {parsed.source_path for parsed in unique_documents}
@@ -172,12 +180,43 @@ class IngestionService:
             "unchanged": unchanged,
             "removed": removed,
             "failed": failed,
-            "skipped": skipped,
+            "skipped": len(skipped_documents),
             "duplicates": duplicates,
         }
-        if added or updated or removed or failed or duplicates:
+        if added or updated or removed or failed:
             LOGGER.info("Ingestion scan: %s", result)
         return result
+
+    def _record_skipped(self, skipped_documents: dict[str, str]) -> None:
+        entries = [
+            {"source_path": path, "reason": reason}
+            for path, reason in sorted(skipped_documents.items())
+        ]
+        previous = self.db.get_state(SKIPPED_STATE_KEY) or {}
+        previous_entries = previous.get("documents", [])
+        if entries == previous_entries:
+            return
+
+        self.db.set_state(
+            SKIPPED_STATE_KEY,
+            {
+                "count": len(entries),
+                "documents": entries,
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        previous_paths = {entry["source_path"] for entry in previous_entries}
+        current_paths = set(skipped_documents)
+        LOGGER.info(
+            "Excluded files with no indexable text: %s total, %s new, %s resolved. "
+            "Run 'product-memory skipped' for the list.",
+            len(entries),
+            len(current_paths - previous_paths),
+            len(previous_paths - current_paths),
+        )
+
+    def skipped_documents(self) -> dict[str, Any]:
+        return self.db.get_state(SKIPPED_STATE_KEY) or {"count": 0, "documents": []}
 
     @staticmethod
     def _deduplicate_documents(parsed_documents: list[ParsedDocument]) -> tuple[list[ParsedDocument], int]:

@@ -13,6 +13,18 @@ from product_memory.retrieval.reranker import Reranker
 from product_memory.retrieval.service import Retriever
 from product_memory.settings import Settings, get_settings
 
+HEALTH_PATHS = ("/health", "/health/live")
+
+
+class _SuppressHealthProbes(logging.Filter):
+    """Drops the access log line the container healthcheck writes every few seconds."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 3:
+            return True
+        return str(args[2]) not in HEALTH_PATHS
+
 
 class Runtime:
     def __init__(self, settings: Settings | None = None):
@@ -37,6 +49,9 @@ class Runtime:
             level=getattr(logging, self.settings.log_level.upper(), logging.INFO),
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         )
+        access_logger = logging.getLogger("uvicorn.access")
+        if not any(isinstance(existing, _SuppressHealthProbes) for existing in access_logger.filters):
+            access_logger.addFilter(_SuppressHealthProbes())
         self.db.wait_until_ready()
         self.db.initialize_schema()
         self.ingestion.ensure_index_profile()
