@@ -32,6 +32,17 @@ def _skip_reason(error: Exception, path: Path) -> str:
     return reason or type(error).__name__
 
 
+def _format_report(report: dict[str, Any], indent: int = 2) -> str:
+    lines = []
+    for key, value in report.items():
+        if isinstance(value, dict):
+            lines.append(f"{' ' * indent}{key}:")
+            lines.append(_format_report(value, indent + 2))
+        else:
+            lines.append(f"{' ' * indent}{key}: {value}")
+    return "\n".join(lines)
+
+
 class IngestionService:
     def __init__(
         self,
@@ -127,19 +138,19 @@ class IngestionService:
             "completed_at": datetime.now(UTC).isoformat(),
         }
 
-    def scan_once(self) -> dict[str, int]:
+    def scan_once(self) -> dict[str, Any]:
         profile = self.ensure_index_profile()
         with self.db.advisory_lock(INDEX_LOCK):
             return self._scan_once_locked(profile)
 
-    def rebuild_all(self) -> dict[str, int]:
+    def rebuild_all(self) -> dict[str, Any]:
         # reindex_all only re-embeds stored content, so extraction changes such as new OCR
         # output need every file read from disk again.
         profile = self.ensure_index_profile()
         with self.db.advisory_lock(INDEX_LOCK):
             return self._scan_once_locked(profile, force=True)
 
-    def _scan_once_locked(self, profile: dict[str, Any], force: bool = False) -> dict[str, int]:
+    def _scan_once_locked(self, profile: dict[str, Any], force: bool = False) -> dict[str, Any]:
         root = self.settings.knowledge_dir
         root.mkdir(parents=True, exist_ok=True)
         paths = self._discover_paths(root)
@@ -175,17 +186,34 @@ class IngestionService:
 
         removed = self._deactivate_missing(found_paths)
         result = {
-            "added": added,
-            "updated": updated,
-            "unchanged": unchanged,
-            "removed": removed,
-            "failed": failed,
-            "skipped": len(skipped_documents),
-            "duplicates": duplicates,
+            "scan": {
+                "added": added,
+                "updated": updated,
+                "unchanged": unchanged,
+                "removed": removed,
+                "failed": failed,
+                "skipped": len(skipped_documents),
+                "duplicates": duplicates,
+            },
+            "index": self._index_totals(),
         }
         if added or updated or removed or failed:
-            LOGGER.info("Ingestion scan: %s", result)
+            LOGGER.info("Ingestion scan\n%s", _format_report(result))
         return result
+
+    def _index_totals(self) -> dict[str, Any]:
+        with self.db.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                  (SELECT count(*) FROM documents WHERE is_active = TRUE) AS documents,
+                  (SELECT count(*) FROM chunks) AS chunks,
+                  pg_size_pretty(
+                    pg_total_relation_size('documents') + pg_total_relation_size('chunks')
+                  ) AS size
+                """
+            ).fetchone()
+        return {"documents": row["documents"], "chunks": row["chunks"], "size": row["size"]}
 
     def _record_skipped(self, skipped_documents: dict[str, str]) -> None:
         entries = [

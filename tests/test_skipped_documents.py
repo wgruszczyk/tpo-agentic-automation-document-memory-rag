@@ -4,7 +4,12 @@ from typing import Any
 
 from product_memory.ingestion.extractors import UnreadableDocumentError
 from product_memory.ingestion.parser import EmptyDocumentError
-from product_memory.ingestion.service import SKIPPED_STATE_KEY, IngestionService, _skip_reason
+from product_memory.ingestion.service import (
+    SKIPPED_STATE_KEY,
+    IngestionService,
+    _format_report,
+    _skip_reason,
+)
 from product_memory.runtime import _SuppressHealthProbes
 from product_memory.settings import Settings
 
@@ -76,6 +81,20 @@ def test_an_unchanged_skip_list_is_neither_rewritten_nor_logged_again(caplog: An
 
 def test_skipped_documents_reports_an_empty_list_before_the_first_scan() -> None:
     assert _service(StateDatabase()).skipped_documents() == {"count": 0, "documents": []}
+
+
+def test_a_report_is_rendered_as_an_indented_yaml_block() -> None:
+    rendered = _format_report({"scan": {"added": 1}, "index": {"documents": 2, "size": "9 MB"}})
+
+    assert rendered == "\n".join(
+        [
+            "  scan:",
+            "    added: 1",
+            "  index:",
+            "    documents: 2",
+            "    size: 9 MB",
+        ]
+    )
 
 
 def test_health_probe_access_lines_are_dropped_and_others_are_kept() -> None:
