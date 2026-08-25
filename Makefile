@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped warmup observability observability-stop grafana prometheus metrics ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
+.PHONY: start stop restart logs status skipped warmup observability observability-stop grafana prometheus metrics ingest reindex rebuild smoke query eval generate-eval link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -76,8 +76,14 @@ query:
 
 # Scores retrieval against eval/questions.yaml, which stays out of version control.
 eval:
-	@test -f eval/questions.yaml || (echo "Create eval/questions.yaml from eval/questions.example.yaml" >&2; exit 2)
+	@test -f eval/questions.yaml || (echo "Create eval/questions.yaml from eval/questions.example.yaml, or run 'make generate-eval'" >&2; exit 2)
 	$(COMPOSE) exec product-memory product-memory eval $(args)
+
+# Builds a question set from your own indexed documents. Review it, then rename it to
+# eval/questions.yaml. Both names are gitignored.
+generate-eval:
+	$(COMPOSE) exec -T product-memory product-memory generate-eval $(args) > eval/questions.generated.yaml
+	@echo "Wrote eval/questions.generated.yaml"
 
 link-knowledge:
 	@test -f .env || cp .env.example .env

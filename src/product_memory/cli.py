@@ -95,6 +95,35 @@ def warmup() -> None:
     print_json(json.dumps(report, default=str))
 
 
+@app.command("generate-eval")
+def generate_eval(
+    count: int = typer.Option(50, min=1, max=500, help="How many questions to generate."),
+    seed: str = typer.Option("product-memory", help="Changing this samples different documents."),
+    terms: int = typer.Option(8, min=3, max=20, help="Words taken from each sampled passage."),
+) -> None:
+    """Build a question set from the indexed documents and write the YAML to stdout.
+
+    Each question is the most distinctive wording of one passage, expecting the document it came
+    from. Written questions are better evidence; these exist so there is something to measure
+    before anyone has written any.
+    """
+    from product_memory.eval_generation import generate_cases, render_yaml
+
+    runtime = ready_runtime()
+    cases = generate_cases(runtime.db, count=count, seed=seed, terms_per_question=terms)
+    if not cases:
+        raise typer.BadParameter("No indexed documents were usable. Run an ingest first.")
+
+    # The questions go to stdout so the caller decides where they land; the knowledge and eval
+    # folders are mounted read-only on purpose.
+    typer.echo(render_yaml(cases, seed))
+    typer.echo(
+        f"Generated {len(cases)} questions from "
+        f"{len({case.source_path for case in cases})} documents.",
+        err=True,
+    )
+
+
 @app.command("smoke-test")
 def smoke_test(url: str = "http://127.0.0.1:2600/mcp") -> None:
     """Connect through MCP, list tools, and execute a real retrieval against the sample knowledge."""

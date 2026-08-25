@@ -45,7 +45,8 @@ product-memory-backup.sql
 !/knowledge/example-knowledge.md
 
 # Real evaluation questions reference private document names
-/eval/questions.yaml
+/eval/questions*.yaml
+!/eval/questions.example.yaml
 
 # Editor and OS files
 .DS_Store
