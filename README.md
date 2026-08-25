@@ -183,6 +183,47 @@ Stop the observability services without touching the core stack:
 make observability-stop
 ```
 
+## Measuring Quality
+
+Retrieval quality is scored against your own question set. Copy the template, replace it with
+questions about your own documents, and run it:
+
+```bash
+cp eval/questions.example.yaml eval/questions.yaml
+make eval
+make eval args='--top-k 10 --verbose'
+```
+
+`eval/questions.yaml` is gitignored, so private document names stay out of version control.
+
+Each question lists fragments of the source paths it expects. Grades are optional and say how
+relevant each document is — 3 answers the question outright, 2 covers part of it, 1 is worth
+returning but settles nothing:
+
+```yaml
+- question: What are the agreed payment terms?
+  expect:
+    - path: framework-agreement
+      grade: 3
+    - path: payment-schedule-annex
+      grade: 2
+```
+
+The report gives:
+
+| Metric | Reads as |
+|---|---|
+| `hit_rate` | Share of questions where any expected document came back at all. |
+| `mrr` | How near the top the first expected document landed. 1.0 means always first. |
+| `recall` | Share of expected documents that were returned, not just the first. |
+| `precision` | Share of returned documents that were expected. Falls as `top_k` rises. |
+| `ndcg` | Whether the *most* relevant documents came first. Needs grades to say anything. |
+| `latency_seconds` | Mean, p50, p95 and max time per question. |
+
+Size the question set before reading much into a change. Below roughly 50 questions, a few points
+of movement in any of these is indistinguishable from luck, so a model or setting change cannot be
+judged by it.
+
 ## Knowledge Inbox
 
 Drop supported files into `knowledge/`, including nested directories:

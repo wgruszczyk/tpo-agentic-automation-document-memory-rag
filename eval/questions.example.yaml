@@ -5,16 +5,50 @@
 #
 # expect lists case-insensitive fragments of source_path. A question counts as a hit when any
 # fragment appears in the top documents returned for that question.
+#
+# Aim for 50 or more questions. Below roughly that, a few points of movement in any metric is
+# indistinguishable from luck, so a model or setting change cannot be judged by it.
+#
+# Two forms are accepted. The short form treats every expectation as equally relevant:
+#
+#   expect:
+#     - framework-agreement
+#
+# The graded form says how relevant each document is, which is what nDCG reads. Use 3 for a
+# document that answers the question outright, 2 for one that covers part of it, and 1 for one
+# worth returning that settles nothing. Grade at least some questions, or nDCG tells you little
+# that the hit rate did not.
 
 - question: What are the agreed payment terms?
   expect:
-    - framework-agreement
+    - path: framework-agreement
+      grade: 3
+    - path: payment-schedule-annex
+      grade: 2
 
 - question: Which brands are available in each country?
   expect:
-    - country-matrix
-    - market-overview
+    - path: country-matrix
+      grade: 3
+    - path: market-overview
+      grade: 1
 
 - question: What was decided about discount handling?
   expect:
-    - discounts
+    - path: discounts
+      grade: 3
+    - path: pricing-workshop-notes
+      grade: 2
+
+# The short form still works, and every fragment counts as grade 1.
+- question: Who signed off the integration design?
+  expect:
+    - integration-design
+    - sign-off-register
+
+# A question restricted to one project, matched against document metadata.
+- question: What is the rollout sequence?
+  project: rollout
+  expect:
+    - path: rollout-plan
+      grade: 3
