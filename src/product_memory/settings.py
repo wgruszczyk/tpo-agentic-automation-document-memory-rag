@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     # given, so feeding it a whole chunk dilutes the few lines that answer the question. Cutting
     # it short scored better at every step down to this point, and costs less; below it,
     # truncation starts removing answers rather than padding.
+    #
+    # Raising it was retested against both a handwritten and a generated question set: 320 scored
+    # better on generated probes and worse on written questions, and cost twice the latency. The
+    # generated set rewards seeing further into a chunk for its own sake, so 192 stands.
     reranker_max_length: int = Field(default=192, ge=64, le=2048)
     reranker_threads: int = Field(default=8, ge=1)
     # Fused against the shortlist it was given, so retrieval keeps a say. Much smaller than

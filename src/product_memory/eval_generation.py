@@ -142,6 +142,13 @@ def generate_cases(
     property worth guarding against regressions, but it is not the same as answering a question
     a person would actually ask, and the wording comes from the document itself, which flatters
     any signal that matches on words. Treat the result as a regression net, not as a score.
+
+    One bias is sharp enough to name. The probe is drawn from the richest sentence anywhere in a
+    chunk, so these questions reward any change that lets the reranker read further into a chunk,
+    whether or not it judges relevance better. Measured against a handwritten set, raising
+    RERANKER_MAX_LENGTH moved these questions and the written ones in opposite directions. Do not
+    tune truncation, chunk size, or anything else that changes how much text a stage sees, on a
+    generated set alone.
     """
     with db.connection() as conn:
         total_chunks = int(conn.execute("SELECT count(*) AS n FROM chunks").fetchone()["n"])
@@ -195,6 +202,10 @@ def render_yaml(cases: list[GeneratedCase], seed: str) -> str:
         "# regressions well. It is not a question a person would ask, and its wording comes from",
         "# the document, which flatters signals that match on words. Replace these with real",
         "# questions as you write them, and keep the generated ones as a regression net.",
+        "#",
+        "# The probe sentence can sit anywhere in its chunk, so these questions reward any change",
+        "# that lets a stage read further into a chunk, whether or not it judges relevance better.",
+        "# Do not tune RERANKER_MAX_LENGTH or CHUNK_SIZE against this set alone.",
         "#",
         f"# seed: {seed} ({digest})",
         f"# questions: {len(cases)}",

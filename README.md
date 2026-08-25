@@ -227,6 +227,13 @@ not a question anyone would actually ask, and the wording comes from the documen
 flatters signals that match on words. Treat it as a regression net and replace entries with real
 questions as you write them.
 
+One bias is worth naming, because it will mislead you. The probe sentence can sit anywhere in its
+chunk, so a generated set rewards any change that lets a stage read *further* into a chunk, whether
+or not that change judges relevance any better. Raising `RERANKER_MAX_LENGTH` from 192 to 320 scored
++0.18 hit rate on a generated set and −0.06 on a handwritten one — the same change, measured in
+opposite directions. Keep a handwritten set, however small, and check any result against it before
+acting on it. Never tune truncation or chunk size on generated questions alone.
+
 Handwritten questions list fragments of the source paths that should answer them. Grades are
 optional and say how relevant each document is — 3 answers it outright, 2 covers part, 1 is worth
 returning but settles nothing:
