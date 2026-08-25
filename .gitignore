@@ -35,6 +35,9 @@ docker-compose.knowledge-links.yml
 *.pid
 product-memory-backup.sql
 
+# Observability runtime data
+/observability/**/data/
+
 # Local knowledge documents
 /knowledge/**
 !/knowledge/

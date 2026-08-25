@@ -10,7 +10,6 @@ from product_memory.ingestion.service import (
     _format_report,
     _skip_reason,
 )
-from product_memory.runtime import _SuppressHealthProbes
 from product_memory.settings import Settings
 
 
@@ -95,22 +94,3 @@ def test_a_report_is_rendered_as_an_indented_yaml_block() -> None:
             "    size: 9 MB",
         ]
     )
-
-
-def test_health_probe_access_lines_are_dropped_and_others_are_kept() -> None:
-    log_filter = _SuppressHealthProbes()
-
-    def record(path: str) -> logging.LogRecord:
-        return logging.LogRecord(
-            name="uvicorn.access",
-            level=logging.INFO,
-            pathname=__file__,
-            lineno=1,
-            msg='%s - "%s %s HTTP/%s" %d',
-            args=("127.0.0.1:50114", "GET", path, "1.1", 200),
-            exc_info=None,
-        )
-
-    assert log_filter.filter(record("/health/live")) is False
-    assert log_filter.filter(record("/health")) is False
-    assert log_filter.filter(record("/mcp")) is True

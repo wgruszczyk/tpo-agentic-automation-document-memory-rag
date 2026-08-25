@@ -96,6 +96,8 @@ class Settings(BaseSettings):
 
     mcp_allowed_hosts: str = "localhost,localhost:*,127.0.0.1,127.0.0.1:*,[::1],[::1]:*"
     log_level: str = "INFO"
+    # json emits one object per line for Loki; rich stays readable in a terminal.
+    log_format: Literal["rich", "json"] = "rich"
 
     @field_validator(
         "embedding_revision",

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from typing import Any, TypeVar
 
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
@@ -12,10 +15,32 @@ from starlette.responses import JSONResponse, Response
 
 from product_memory import __version__
 from product_memory.inspection import inspect_documents
+from product_memory.metrics import TOOL_CALLS, TOOL_SECONDS, render
 from product_memory.runtime import Runtime
 
 LOGGER = logging.getLogger(__name__)
 runtime = Runtime()
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def measured(tool: str) -> Callable[[F], F]:
+    def decorate(function: F) -> F:
+        @functools.wraps(function)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            started = time.perf_counter()
+            outcome = "error"
+            try:
+                result = function(*args, **kwargs)
+                outcome = "ok"
+                return result
+            finally:
+                TOOL_SECONDS.labels(tool=tool).observe(time.perf_counter() - started)
+                TOOL_CALLS.labels(tool=tool, outcome=outcome).inc()
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorate
 
 SERVER_INSTRUCTIONS = """
 Use this server as the tpo-automation-document-rag source of truth for private project knowledge.
@@ -68,6 +93,7 @@ mcp = MCPServer(
 
 
 @mcp.tool()
+@measured("retrieve_knowledge")
 def retrieve_knowledge(
     query: str,
     top_k_chunks: int | None = None,
@@ -100,6 +126,7 @@ def retrieve_knowledge(
 
 
 @mcp.tool()
+@measured("search")
 def search(
     query: str,
     limit: int = 10,
@@ -119,12 +146,14 @@ def search(
 
 
 @mcp.tool()
+@measured("fetch")
 def fetch(id: str) -> dict:  # noqa: A002
     """Fetch a complete private project document or chunk by id or tpo-automation-document-rag URI."""
     return runtime.retriever.fetch(id).model_dump(mode="json")
 
 
 @mcp.tool()
+@measured("list_documents")
 def list_documents(
     limit: int = 100,
     project: str | None = None,
@@ -139,6 +168,7 @@ def list_documents(
 
 
 @mcp.tool()
+@measured("knowledge_status")
 def knowledge_status() -> dict:
     """Show whether the private document index is ready, plus embedding profile and document counts."""
     return runtime.retriever.status()
@@ -158,6 +188,13 @@ async def health(request: Request) -> Response:
 async def health_live(request: Request) -> Response:
     # Liveness only. A rebuild empties the index on purpose, so readiness must not restart the server.
     return JSONResponse({"status": "alive", "version": __version__})
+
+
+@mcp.custom_route("/metrics", methods=["GET"])
+async def metrics(request: Request) -> Response:
+    await asyncio.to_thread(runtime.refresh_index_gauges)
+    payload, content_type = render()
+    return Response(payload, media_type=content_type)
 
 
 @mcp.custom_route("/debug/documents", methods=["GET"])

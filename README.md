@@ -93,12 +93,95 @@ Useful commands:
 | `make ingest` | Run one scan now. |
 | `make skipped` | List files that hold no indexable text, with the reason each was left out. |
 | `make warmup` | Download the embedding and reranker models and print the revisions to pin. |
+| `make observability` | Start Prometheus, Loki, Promtail and Grafana. |
+| `make metrics` | Print the raw Prometheus scrape output. |
 | `make reindex` | Rebuild embeddings from stored documents. |
 | `make rebuild` | Re-read every file from disk, then rebuild content, metadata, and embeddings. Use this after an extraction change, such as new OCR or format support. |
 | `make restart` | Restart the MCP service. |
 | `make eval` | Score retrieval against your own question set. |
 | `make clean` | Stop containers without deleting volumes. |
 | `make reset-data` | Delete Docker volumes, including Postgres data and model cache. |
+
+## Offline Operation
+
+After the first start the service never reaches the internet. Models load from the cache volume with
+`local_files_only`, and Hugging Face offline mode is switched on, so a restart resolves nothing over
+the network. The knowledge scan touches only disk and Postgres, and the container healthcheck calls
+its own loopback address.
+
+Two settings make that guarantee explicit:
+
+```dotenv
+ALLOW_MODEL_DOWNLOAD=false
+EMBEDDING_REVISION=<commit printed by make warmup>
+RERANKER_REVISION=<commit printed by make warmup>
+```
+
+With `ALLOW_MODEL_DOWNLOAD=false`, a model missing from the cache raises a clear error instead of
+quietly pulling gigabytes. `make warmup` is then the only command that downloads anything, and it
+prints the revisions to pin:
+
+```bash
+make warmup
+```
+
+Run it after changing `EMBEDDING_MODEL` or `RERANKER_MODEL`, then paste the new revisions into `.env`.
+
+## Observability
+
+Metrics, dashboards and log browsing run as a separate Compose profile, so the core stack stays
+light. Set a Grafana password first, and switch the service to JSON logs so Loki can index their
+fields rather than whole lines:
+
+```dotenv
+LOG_FORMAT=json
+GRAFANA_ADMIN_PASSWORD=<choose one>
+```
+
+```bash
+make restart          # picks up LOG_FORMAT
+make observability
+```
+
+| Service | URL | Purpose |
+|---|---|---|
+| Grafana | <http://localhost:2601> | Dashboards and log browsing. Log in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`. |
+| Prometheus | <http://localhost:2602> | Raw metric queries and scrape target health. |
+| Loki | <http://localhost:2603> | Log store. Query it through Grafana rather than directly. |
+
+Everything binds to `127.0.0.1` only, like the MCP port. Ports avoid the conventional 3000 and 5000
+because macOS runs AirPlay Receiver on 5000.
+
+The provisioned **Product Memory Overview** dashboard, under the *Product Memory* folder, answers:
+
+- **Where does a query spend its time?** Stage latency at p50 and p95, broken down into `embed_query`,
+  `search_sql`, `rerank`, `documents` and `compress`. `search_sql` is the pgvector scan and `rerank`
+  is the cross-encoder; those two dominate.
+- **How is the index growing?** Document, chunk and byte counts, plus the number of excluded files.
+- **Is ingestion healthy?** Scan duration, and documents per scan outcome.
+- **What did the service say?** A Loki panel over the service logs, with a level filter.
+
+To browse logs directly, open Grafana's *Explore*, pick the Loki datasource, and start from:
+
+```logql
+{service="product-memory"}                        # everything
+{service="product-memory"} | level = "ERROR"      # only errors
+{service="product-memory"} |= "Ingestion scan"    # scan reports
+```
+
+The `level` and `logger` fields become labels only when `LOG_FORMAT=json`.
+
+When a panel is empty, check the scrape directly:
+
+```bash
+make metrics
+```
+
+Stop the observability services without touching the core stack:
+
+```bash
+make observability-stop
+```
 
 ## Knowledge Inbox
 

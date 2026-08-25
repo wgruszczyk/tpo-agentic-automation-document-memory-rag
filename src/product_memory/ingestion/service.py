@@ -16,6 +16,7 @@ from product_memory.embeddings.base import EmbeddingProvider
 from product_memory.ingestion.chunker import DocumentChunker
 from product_memory.ingestion.extractors import UnreadableDocumentError
 from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError, ParsedDocument
+from product_memory.metrics import INGESTION_DOCUMENTS, INGESTION_SECONDS, observe
 from product_memory.settings import Settings
 
 LOGGER = logging.getLogger(__name__)
@@ -151,6 +152,10 @@ class IngestionService:
             return self._scan_once_locked(profile, force=True)
 
     def _scan_once_locked(self, profile: dict[str, Any], force: bool = False) -> dict[str, Any]:
+        with observe(INGESTION_SECONDS):
+            return self._scan(profile, force=force)
+
+    def _scan(self, profile: dict[str, Any], force: bool = False) -> dict[str, Any]:
         root = self.settings.knowledge_dir
         root.mkdir(parents=True, exist_ok=True)
         paths = self._discover_paths(root)
@@ -185,18 +190,18 @@ class IngestionService:
                 unchanged += 1
 
         removed = self._deactivate_missing(found_paths)
-        result = {
-            "scan": {
-                "added": added,
-                "updated": updated,
-                "unchanged": unchanged,
-                "removed": removed,
-                "failed": failed,
-                "skipped": len(skipped_documents),
-                "duplicates": duplicates,
-            },
-            "index": self._index_totals(),
+        counters = {
+            "added": added,
+            "updated": updated,
+            "unchanged": unchanged,
+            "removed": removed,
+            "failed": failed,
+            "skipped": len(skipped_documents),
+            "duplicates": duplicates,
         }
+        for outcome, count in counters.items():
+            INGESTION_DOCUMENTS.labels(outcome=outcome).inc(count)
+        result = {"scan": counters, "index": self._index_totals()}
         if added or updated or removed or failed:
             LOGGER.info("Ingestion scan\n%s", _format_report(result))
         return result
@@ -208,12 +213,21 @@ class IngestionService:
                 SELECT
                   (SELECT count(*) FROM documents WHERE is_active = TRUE) AS documents,
                   (SELECT count(*) FROM chunks) AS chunks,
+                  pg_total_relation_size('documents') + pg_total_relation_size('chunks') AS bytes,
                   pg_size_pretty(
                     pg_total_relation_size('documents') + pg_total_relation_size('chunks')
                   ) AS size
                 """
             ).fetchone()
-        return {"documents": row["documents"], "chunks": row["chunks"], "size": row["size"]}
+        return {
+            "documents": row["documents"],
+            "chunks": row["chunks"],
+            "bytes": row["bytes"],
+            "size": row["size"],
+        }
+
+    def index_totals(self) -> dict[str, Any]:
+        return self._index_totals()
 
     def _record_skipped(self, skipped_documents: dict[str, str]) -> None:
         entries = [

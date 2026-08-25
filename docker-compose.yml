@@ -53,8 +53,76 @@ services:
       timeout: 5s
       retries: 12
 
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-2602}:9090"
+
+  loki:
+    image: grafana/loki:3.3.2
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-2603}:3100"
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml -config.expand-env=true
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      # Read-only socket access is enough to discover containers and read their logs.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_data:/tmp
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      POSTGRES_USER: ${POSTGRES_USER:-product_memory}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-product_memory_local_only}
+      POSTGRES_DB: ${POSTGRES_DB:-product_memory}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-2601}:3000"
+    depends_on:
+      - prometheus
+      - loki
+
 volumes:
   postgres_data:
     name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_postgres_data
   huggingface_cache:
     name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_huggingface_cache
+  prometheus_data:
+  loki_data:
+  promtail_data:
+  grafana_data:

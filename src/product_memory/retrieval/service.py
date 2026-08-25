@@ -11,6 +11,7 @@ from dateutil import parser as date_parser
 from product_memory.db import Database
 from product_memory.embeddings.base import EmbeddingProvider
 from product_memory.ingestion.service import INDEX_STATE_KEY, SKIPPED_STATE_KEY
+from product_memory.metrics import RESULT_COUNT, stage
 from product_memory.models import (
     ChunkResult,
     DocumentResult,
@@ -124,26 +125,33 @@ class Retriever:
         candidates = self._search_chunks(
             query=query,
             profile_hash=profile["fingerprint"],
-            limit=max(chunk_limit, self.settings.candidate_pool_chunks) if reranking else chunk_limit,
+            limit=max(chunk_limit, self.settings.candidate_pool_chunks)
+            if reranking
+            else chunk_limit,
             project=project,
             since=since_at,
             until=until_at,
             per_signal=self.settings.candidate_pool_per_signal if reranking else 0,
         )
         if self.reranker is not None:
-            candidates = self.reranker.rerank(query, candidates, limit=len(candidates))
+            with stage("rerank"):
+                candidates = self.reranker.rerank(query, candidates, limit=len(candidates))
         chunks = candidates[:chunk_limit]
         # Documents are read off the whole pool, not just what is returned. Otherwise asking for
         # more documents than chunks silently returns fewer.
-        documents = self._documents_for_chunks(
-            candidates,
-            limit=document_limit,
-            include_content=include_full_documents,
-        )
-        context_pack = self.compressor.pack(
-            chunks,
-            max_chars=context_limit,
-        )
+        with stage("documents"):
+            documents = self._documents_for_chunks(
+                candidates,
+                limit=document_limit,
+                include_content=include_full_documents,
+            )
+        with stage("compress"):
+            context_pack = self.compressor.pack(
+                chunks,
+                max_chars=context_limit,
+            )
+        RESULT_COUNT.labels(kind="chunks").observe(len(chunks))
+        RESULT_COUNT.labels(kind="documents").observe(len(documents))
         return RetrievalResponse(
             query=query,
             chunks=chunks,
@@ -321,7 +329,8 @@ class Retriever:
         until: datetime | None = None,
         per_signal: int = 0,
     ) -> list[ChunkResult]:
-        query_embedding = np.asarray(self.provider.embed_query(query), dtype=np.float32)
+        with stage("embed_query"):
+            query_embedding = np.asarray(self.provider.embed_query(query), dtype=np.float32)
         params: dict[str, Any] = {
             "embedding": query_embedding,
             "query": query,
@@ -438,7 +447,7 @@ class Retriever:
                OR lexical_rank <= %(per_signal)s
             ORDER BY score DESC, effective_at DESC
         """
-        with self.db.connection() as conn:
+        with self.db.connection() as conn, stage("search_sql"):
             rows = conn.execute(sql, params).fetchall()
         return [
             ChunkResult(

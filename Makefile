@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped warmup ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
+.PHONY: start stop restart logs status skipped warmup observability observability-stop grafana prometheus metrics ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -32,6 +32,29 @@ skipped:
 # The only command that downloads models. Prints the revisions to pin afterwards.
 warmup:
 	$(COMPOSE) exec product-memory product-memory warmup
+
+# Prometheus, Loki, Promtail and Grafana. Logs must be JSON for Loki to index their fields.
+observability:
+	@grep -q '^GRAFANA_ADMIN_PASSWORD=.\+' .env || \
+		(echo "Set GRAFANA_ADMIN_PASSWORD in .env first." >&2; exit 2)
+	@grep -q '^LOG_FORMAT=json' .env || \
+		echo "Note: LOG_FORMAT is not json, so Loki will index whole lines rather than fields."
+	$(COMPOSE) --profile observability up -d
+	@echo "Grafana    http://localhost:$${GRAFANA_PORT:-2601}"
+	@echo "Prometheus http://localhost:$${PROMETHEUS_PORT:-2602}"
+
+observability-stop:
+	$(COMPOSE) --profile observability stop grafana prometheus loki promtail
+
+grafana:
+	open http://localhost:$${GRAFANA_PORT:-2601}
+
+prometheus:
+	open http://localhost:$${PROMETHEUS_PORT:-2602}
+
+# Raw scrape output, useful when a dashboard panel is empty and you need to know why.
+metrics:
+	curl -fsS http://localhost:$${MCP_PORT:-2600}/metrics
 
 ingest:
 	$(COMPOSE) exec product-memory product-memory ingest-once
