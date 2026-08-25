@@ -107,6 +107,37 @@ def test_search_chunks_uses_stronger_lexical_signals() -> None:
     assert "WHERE semantic_score >= %(min_semantic_score)s" in sql
 
 
+def test_reading_whole_chunks_is_confined_to_the_shortlist() -> None:
+    db = FakeDatabase()
+    retriever = Retriever(
+        settings=Settings(_env_file=None),
+        db=db,  # type: ignore[arg-type]
+        provider=FakeProvider(),
+        compressor=None,  # type: ignore[arg-type]
+    )
+
+    retriever._search_chunks(query="payment retries", profile_hash="profile", limit=5, project=None)  # noqa: SLF001
+
+    sql = db.connection_instance.sql
+    shortlist_start = sql.index("shortlist AS MATERIALIZED (")
+    candidate_stage = sql[sql.index("candidate AS MATERIALIZED (") : sql.index("gated AS (")]
+    shortlist_stage = sql[shortlist_start : sql.index("ranked AS (", shortlist_start)]
+
+    # The scan over every chunk must not compare the question against chunk text or metadata.
+    assert "word_similarity(%(query)s, coalesce(c.content" not in candidate_stage
+    assert "coalesce(c.content, '')) * 0.65" not in candidate_stage
+    assert "word_similarity(%(query)s, coalesce(d.metadata" not in candidate_stage
+    assert "word_similarity(%(query)s, coalesce(c.content, ''))" in shortlist_stage
+    assert "word_similarity(%(query)s, coalesce(d.metadata::text, ''))" in shortlist_stage
+    assert db.connection_instance.params["scoring_pool"] == 400
+    assert "cheap_semantic_rank <= %(scoring_pool)s" in sql
+    assert "cheap_lexical_rank <= %(scoring_pool)s" in sql
+    assert "cheap_recency_rank <= %(scoring_pool)s" in sql
+    # Inlining these lets the planner re-evaluate every scoring expression once per ranking sort.
+    assert "candidate AS MATERIALIZED (" in sql
+    assert "shortlist AS MATERIALIZED (" in sql
+
+
 def test_search_chunks_fuses_the_signals_by_rank_not_by_value() -> None:
     db = FakeDatabase()
     retriever = Retriever(

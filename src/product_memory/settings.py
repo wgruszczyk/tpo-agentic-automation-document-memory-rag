@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     # liked. A passage nobody else votes for can still be the only one that names the answer.
     candidate_pool_per_signal: int = Field(default=25, ge=0, le=1000)
 
+    # How many chunks are read in full to score them against the question. Comparing the wording
+    # of a question against a whole chunk of prose costs more than the vector search, the text
+    # search and the recency decay together, so it is spent only on chunks a cheaper signal
+    # already ranked highly. Raise it if a fuzzy phrase buried mid-document is being missed.
+    scoring_pool_chunks: int = Field(default=400, ge=1, le=20000)
+
     reranker_enabled: bool = True
     # Multilingual, and small enough to read a shortlist on a CPU. The larger v2-m3 scores better
     # and takes several times as long; worth swapping in where latency is not the binding cost.

@@ -344,6 +344,7 @@ class Retriever:
             "terms": query_terms(query),
             "half_life": self.settings.recency_half_life_days,
             "min_semantic_score": self.settings.min_semantic_score,
+            "scoring_pool": self.settings.scoring_pool_chunks,
             "project": project,
             "since": since,
             "until": until,
@@ -360,53 +361,39 @@ class Retriever:
                     lower(%(query)s) AS raw_query,
                     %(terms)s::text[] AS terms
             ),
-            scored AS (
+            -- MATERIALIZED is load-bearing. Inlined, every scoring expression below is textually
+            -- substituted into the sort key of each ranking window and evaluated again per sort.
+            candidate AS MATERIALIZED (
                 SELECT
                     c.id,
                     c.document_id,
-                    d.title AS document_title,
-                    d.source_path,
-                    c.chunk_index,
-                    c.content,
-                    c.start_char,
-                    c.end_char,
                     d.effective_at,
-                    d.metadata,
                     GREATEST(0.0, 1.0 - (c.embedding <=> %(embedding)s)) AS semantic_score,
+                    ts_rank_cd(
+                        setweight(to_tsvector('simple', coalesce(d.title, '')), 'A') ||
+                        setweight(to_tsvector('simple', coalesce(d.source_path, '')), 'B') ||
+                        setweight(to_tsvector('simple', coalesce(d.metadata::text, '')), 'B') ||
+                        setweight(c.search_vector, 'C'),
+                        q.text_query,
+                        32
+                    ) * 6.0 AS ts_score,
                     LEAST(
                         1.0,
-                        (
-                            ts_rank_cd(
-                                setweight(to_tsvector('simple', coalesce(d.title, '')), 'A') ||
-                                setweight(to_tsvector('simple', coalesce(d.source_path, '')), 'B') ||
-                                setweight(to_tsvector('simple', coalesce(d.metadata::text, '')), 'B') ||
-                                setweight(c.search_vector, 'C'),
-                                q.text_query,
-                                32
-                            ) * 6.0
-                        ) +
-                        LEAST(
-                            1.0,
-                            coalesce((
-                                SELECT
-                                    0.45 * avg((position(t in lower(coalesce(d.title, ''))) > 0)::int)
-                                  + 0.35 * avg((position(t in lower(coalesce(d.source_path, ''))) > 0)::int)
-                                  + 0.30 * avg((position(t in lower(coalesce(d.metadata::text,''))) > 0)::int)
-                                  + 0.55 * avg((position(t in lower(coalesce(c.content, ''))) > 0)::int)
-                                FROM unnest(q.terms) AS t
-                            ), 0.0)
-                        ) +
-                        (
-                            GREATEST(
-                                similarity(coalesce(d.title, ''), %(query)s),
-                                similarity(coalesce(d.source_path, ''), %(query)s),
-                                word_similarity(%(query)s, coalesce(d.title, '')),
-                                word_similarity(%(query)s, coalesce(d.source_path, '')),
-                                word_similarity(%(query)s, coalesce(d.metadata::text, '')) * 0.75,
-                                word_similarity(%(query)s, coalesce(c.content, '')) * 0.65
-                            ) * 0.45
-                        )
-                    ) AS lexical_score,
+                        coalesce((
+                            SELECT
+                                0.45 * avg((position(t in lower(coalesce(d.title, ''))) > 0)::int)
+                              + 0.35 * avg((position(t in lower(coalesce(d.source_path, ''))) > 0)::int)
+                              + 0.30 * avg((position(t in lower(coalesce(d.metadata::text,''))) > 0)::int)
+                              + 0.55 * avg((position(t in lower(coalesce(c.content, ''))) > 0)::int)
+                            FROM unnest(q.terms) AS t
+                        ), 0.0)
+                    ) AS term_score,
+                    GREATEST(
+                        similarity(coalesce(d.title, ''), %(query)s),
+                        similarity(coalesce(d.source_path, ''), %(query)s),
+                        word_similarity(%(query)s, coalesce(d.title, '')),
+                        word_similarity(%(query)s, coalesce(d.source_path, ''))
+                    ) AS name_similarity,
                     exp(
                         -ln(2.0) * GREATEST(
                             0.0,
@@ -421,13 +408,51 @@ class Retriever:
                   {project_clause}
                   {date_clause}
             ),
+            gated AS (
+                SELECT *,
+                    LEAST(1.0, ts_score + term_score + name_similarity * 0.45) AS cheap_lexical_score
+                FROM candidate
+                WHERE semantic_score >= %(min_semantic_score)s
+            ),
+            cheaply_ranked AS (
+                SELECT *,
+                    rank() OVER (ORDER BY semantic_score DESC) AS cheap_semantic_rank,
+                    rank() OVER (ORDER BY cheap_lexical_score DESC) AS cheap_lexical_rank,
+                    rank() OVER (ORDER BY recency_score DESC) AS cheap_recency_rank
+                FROM gated
+            ),
+            shortlist AS MATERIALIZED (
+                -- Comparing the question against a whole chunk of prose costs more than every
+                -- other signal in this query put together. A passage none of the cheap signals
+                -- ranked anywhere near the top cannot win on that term alone, so only the ones
+                -- already in contention are read in full.
+                SELECT
+                    g.id,
+                    g.document_id,
+                    g.effective_at,
+                    g.semantic_score,
+                    g.recency_score,
+                    LEAST(
+                        1.0,
+                        g.ts_score + g.term_score + GREATEST(
+                            g.name_similarity,
+                            word_similarity(%(query)s, coalesce(d.metadata::text, '')) * 0.75,
+                            word_similarity(%(query)s, coalesce(c.content, '')) * 0.65
+                        ) * 0.45
+                    ) AS lexical_score
+                FROM cheaply_ranked g
+                JOIN chunks c ON c.id = g.id
+                JOIN documents d ON d.id = g.document_id
+                WHERE g.cheap_semantic_rank <= %(scoring_pool)s
+                   OR g.cheap_lexical_rank <= %(scoring_pool)s
+                   OR g.cheap_recency_rank <= %(scoring_pool)s
+            ),
             ranked AS (
                 SELECT *,
                     rank() OVER (ORDER BY semantic_score DESC) AS semantic_rank,
                     rank() OVER (ORDER BY lexical_score DESC) AS lexical_rank,
                     rank() OVER (ORDER BY recency_score DESC) AS recency_rank
-                FROM scored
-                WHERE semantic_score >= %(min_semantic_score)s
+                FROM shortlist
             ),
             fused AS (
                 SELECT *,
@@ -440,12 +465,30 @@ class Retriever:
                 SELECT *, rank() OVER (ORDER BY score DESC, effective_at DESC) AS fused_rank
                 FROM fused
             )
-            SELECT *
-            FROM pooled
-            WHERE fused_rank <= %(limit)s
-               OR semantic_rank <= %(per_signal)s
-               OR lexical_rank <= %(per_signal)s
-            ORDER BY score DESC, effective_at DESC
+            -- The text is fetched only for the handful of rows that survived, so none of the
+            -- ranking above has to carry it through a sort.
+            SELECT
+                p.id,
+                p.document_id,
+                d.title AS document_title,
+                d.source_path,
+                c.chunk_index,
+                c.content,
+                c.start_char,
+                c.end_char,
+                p.effective_at,
+                d.metadata,
+                p.semantic_score,
+                p.lexical_score,
+                p.recency_score,
+                p.score
+            FROM pooled p
+            JOIN chunks c ON c.id = p.id
+            JOIN documents d ON d.id = p.document_id
+            WHERE p.fused_rank <= %(limit)s
+               OR p.semantic_rank <= %(per_signal)s
+               OR p.lexical_rank <= %(per_signal)s
+            ORDER BY p.score DESC, p.effective_at DESC
         """
         with self.db.connection() as conn, stage("search_sql"):
             rows = conn.execute(sql, params).fetchall()
