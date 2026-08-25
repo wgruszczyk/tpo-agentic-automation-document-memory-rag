@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 
+from product_memory.model_cache import prepare_model_load
 from product_memory.models import ChunkResult
 from product_memory.settings import Settings
 
@@ -32,27 +33,16 @@ class Reranker:
         self._score_lock = threading.Lock()
         os.environ.setdefault("HF_HOME", str(settings.hf_home))
 
-    def _is_model_cached(self) -> bool:
-        cache_dir_name = "models--" + self.settings.reranker_model.replace("/", "--")
-        snapshots_dir = self.settings.hf_home / cache_dir_name / "snapshots"
-        if not snapshots_dir.is_dir():
-            return False
-        return any(
-            any(snapshot.glob(pattern))
-            for snapshot in snapshots_dir.iterdir()
-            if snapshot.is_dir()
-            for pattern in ("*.safetensors", "pytorch_model.bin")
-        )
-
     def _load_model(self):  # type: ignore[no-untyped-def]
         if self._model is not None:
             return self._model
         with self._lock:
             if self._model is None:
-                cached = self._is_model_cached()
-                if cached:
-                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+                cached = prepare_model_load(
+                    self.settings.hf_home,
+                    self.settings.reranker_model,
+                    self.settings.allow_model_download,
+                )
 
                 import torch
                 from sentence_transformers import CrossEncoder
@@ -64,8 +54,17 @@ class Reranker:
                     max_length=self.settings.reranker_max_length,
                     cache_folder=str(self.settings.hf_home),
                     local_files_only=cached,
+                    revision=self.settings.reranker_revision,
                 )
         return self._model
+
+    def warmup(self) -> dict[str, str]:
+        """Load the model, fetching it when allowed, and report the revision now on disk."""
+        model = self._load_model()
+        revision = self.settings.reranker_revision
+        if not revision:
+            revision = getattr(getattr(model.model, "config", None), "_commit_hash", None)
+        return {"model": self.settings.reranker_model, "revision": revision or "unresolved"}
 
     @staticmethod
     def _passage(chunk: ChunkResult) -> str:

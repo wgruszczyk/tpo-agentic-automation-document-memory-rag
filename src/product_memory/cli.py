@@ -77,6 +77,24 @@ def skipped() -> None:
     print_json(json.dumps(runtime.ingestion.skipped_documents(), default=str))
 
 
+@app.command("warmup")
+def warmup() -> None:
+    """Download the embedding and reranker models into the cache, and report their revisions.
+
+    This is the only command that reaches the internet on purpose. Pin the revisions it prints
+    to keep later deployments reproducible and offline.
+    """
+    from product_memory.embeddings.factory import create_embedding_provider
+    from product_memory.retrieval.reranker import Reranker
+    from product_memory.settings import get_settings
+
+    settings = get_settings().model_copy(update={"allow_model_download": True})
+    report = {"embedding": create_embedding_provider(settings).profile()}
+    if settings.reranker_enabled:
+        report["reranker"] = Reranker(settings).warmup()
+    print_json(json.dumps(report, default=str))
+
+
 @app.command("smoke-test")
 def smoke_test(url: str = "http://127.0.0.1:2600/mcp") -> None:
     """Connect through MCP, list tools, and execute a real retrieval against the sample knowledge."""

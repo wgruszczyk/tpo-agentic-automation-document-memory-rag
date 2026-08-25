@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
+.PHONY: start stop restart logs status skipped warmup ingest reindex rebuild smoke query eval link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -28,6 +28,10 @@ status:
 # Files that hold no indexable text, and why each one was left out.
 skipped:
 	$(COMPOSE) exec product-memory product-memory skipped
+
+# The only command that downloads models. Prints the revisions to pin afterwards.
+warmup:
+	$(COMPOSE) exec product-memory product-memory warmup
 
 ingest:
 	$(COMPOSE) exec product-memory product-memory ingest-once

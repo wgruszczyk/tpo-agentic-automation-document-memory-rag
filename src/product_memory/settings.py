@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     local_embedding_threads: int = Field(default=4, ge=1)
     hf_home: Path = Path("/models/huggingface")
 
+    # Guards the only outbound traffic this service makes on its own. Off means a cold model
+    # cache fails loudly instead of quietly pulling gigabytes over the network.
+    allow_model_download: bool = True
+
     openai_api_key: str | None = None
     openai_base_url: str | None = None
 
@@ -77,6 +81,7 @@ class Settings(BaseSettings):
     # Multilingual, and small enough to read a shortlist on a CPU. The larger v2-m3 scores better
     # and takes several times as long; worth swapping in where latency is not the binding cost.
     reranker_model: str = "BAAI/bge-reranker-base"
+    reranker_revision: str | None = None
     # Deliberately far below the chunk size. A reranker averages relevance over what it is
     # given, so feeding it a whole chunk dilutes the few lines that answer the question. Cutting
     # it short scored better at every step down to this point, and costs less; below it,
@@ -97,6 +102,7 @@ class Settings(BaseSettings):
         "embedding_dimensions",
         "openai_api_key",
         "openai_base_url",
+        "reranker_revision",
         mode="before",
     )
     @classmethod

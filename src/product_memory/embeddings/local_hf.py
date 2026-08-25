@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from product_memory.embeddings.base import EmbeddingProvider
+from product_memory.model_cache import prepare_model_load
 from product_memory.settings import Settings
 
 
@@ -23,14 +24,11 @@ class LocalHFEmbeddingProvider(EmbeddingProvider):
             return self._model
         with self._lock:
             if self._model is None:
-                cached = self._is_model_cached()
-                if cached:
-                    # Model already downloaded: skip Hub freshness checks so restarts stay fully
-                    # offline. The env vars cover libraries that read them lazily; local_files_only
-                    # is the authoritative switch because huggingface_hub snapshots its env-based
-                    # constants at import time.
-                    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+                cached = prepare_model_load(
+                    self.settings.hf_home,
+                    self.settings.embedding_model,
+                    self.settings.allow_model_download,
+                )
 
                 import torch
                 from sentence_transformers import SentenceTransformer
@@ -45,20 +43,6 @@ class LocalHFEmbeddingProvider(EmbeddingProvider):
                     kwargs["revision"] = self.settings.embedding_revision
                 self._model = SentenceTransformer(self.settings.embedding_model, **kwargs)
         return self._model
-
-    def _is_model_cached(self) -> bool:
-        # An interrupted download leaves config files behind without weights. Treating that as
-        # cached would switch on offline mode and make the failure permanent, so require weights.
-        cache_dir_name = "models--" + self.settings.embedding_model.replace("/", "--")
-        snapshots_dir = self.settings.hf_home / cache_dir_name / "snapshots"
-        if not snapshots_dir.is_dir():
-            return False
-        return any(
-            any(snapshot.glob(pattern))
-            for snapshot in snapshots_dir.iterdir()
-            if snapshot.is_dir()
-            for pattern in ("*.safetensors", "pytorch_model.bin")
-        )
 
     @property
     def uses_e5_prefixes(self) -> bool:
