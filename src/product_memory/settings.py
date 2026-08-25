@@ -84,8 +84,10 @@ class Settings(BaseSettings):
     scoring_pool_chunks: int = Field(default=400, ge=1, le=20000)
 
     reranker_enabled: bool = True
-    # Multilingual, and small enough to read a shortlist on a CPU. The larger v2-m3 scores better
-    # and takes several times as long; worth swapping in where latency is not the binding cost.
+    # Multilingual, and small enough to read a shortlist on a CPU. The larger v2-m3 was measured
+    # against both a handwritten and a generated question set at this truncation: it matched the
+    # hit rate of this model exactly on both, moved reciprocal rank by less than noise in opposite
+    # directions, and cost three times the latency. Bigger is not better here.
     reranker_model: str = "BAAI/bge-reranker-base"
     reranker_revision: str | None = None
     # Deliberately far below the chunk size. A reranker averages relevance over what it is

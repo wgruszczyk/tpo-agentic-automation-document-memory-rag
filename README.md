@@ -196,10 +196,15 @@ the best case any single signal made, not the blended score — a passage can be
 match in the index and still sit deep in the blend.
 
 Reranking costs seconds per query and downloads roughly 1 GB on first use. Set
-`RERANKER_ENABLED=false` where that is the wrong trade. `RERANKER_MAX_LENGTH` is much shorter than a
-chunk on purpose: a reranker averages relevance over everything it is shown, so a whole chunk buries
-the few lines that answer the question. Where the useful floor sits depends on your documents and
-their language. Decide with `make eval`, not by assumption.
+`RERANKER_ENABLED=false` where that is the wrong trade — measured here, turning it off saves about
+3s per query and costs roughly 8 points of hit rate. The larger `bge-reranker-v2-m3` was measured
+against both a handwritten and a generated question set and matched this model's hit rate exactly on
+both, for three times the latency; bigger is not automatically better on a corpus this size.
+
+`RERANKER_MAX_LENGTH` is much shorter than a chunk on purpose: a reranker averages relevance over
+everything it is shown, so a whole chunk buries the few lines that answer the question. Where the
+useful floor sits depends on your documents and their language. Decide with `make eval`, not by
+assumption — and read the warning about generated question sets above before tuning this one.
 
 ## Measuring Quality
 
