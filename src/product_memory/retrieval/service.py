@@ -65,6 +65,25 @@ def query_terms(query: str) -> list[str]:
     return terms
 
 
+def _chunk_from_row(row: Any) -> ChunkResult:
+    return ChunkResult(
+        id=str(row["id"]),
+        document_id=str(row["document_id"]),
+        document_title=row["document_title"],
+        source_path=row["source_path"],
+        chunk_index=row["chunk_index"],
+        content=row["content"],
+        start_char=row["start_char"],
+        end_char=row["end_char"],
+        effective_at=row["effective_at"],
+        metadata=dict(row["metadata"]),
+        semantic_score=float(row["semantic_score"]),
+        lexical_score=float(row["lexical_score"]),
+        recency_score=float(row["recency_score"]),
+        score=float(row["score"]),
+    )
+
+
 def parse_boundary(value: str | datetime | None, label: str) -> datetime | None:
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
@@ -337,24 +356,16 @@ class Retriever:
     ) -> list[ChunkResult]:
         with stage("embed_query"):
             query_embedding = np.asarray(self.provider.embed_query(query), dtype=np.float32)
-        params: dict[str, Any] = {
-            "embedding": query_embedding,
-            "query": query,
-            "profile_hash": profile_hash,
-            "limit": limit,
-            "per_signal": per_signal,
-            "semantic_weight": self.settings.semantic_weight,
-            "lexical_weight": self.settings.lexical_weight,
-            "recency_weight": self.settings.recency_weight,
-            "rrf_k": self.settings.rrf_k,
-            "terms": query_terms(query),
-            "half_life": self.settings.recency_half_life_days,
-            "min_semantic_score": self.settings.min_semantic_score,
-            "scoring_pool": self.settings.scoring_pool_chunks,
-            "project": project,
-            "since": since,
-            "until": until,
-        }
+        params = self._search_params(
+            query=query,
+            query_embedding=query_embedding,
+            profile_hash=profile_hash,
+            limit=limit,
+            project=project,
+            since=since,
+            until=until,
+            per_signal=per_signal,
+        )
         project_clause = "AND (%(project)s::text IS NULL OR d.metadata->>'project' = %(project)s::text)"
         date_clause = (
             "AND (%(since)s::timestamptz IS NULL OR d.effective_at >= %(since)s::timestamptz) "
@@ -386,6 +397,10 @@ class Retriever:
                     LEAST(
                         1.0,
                         coalesce((
+                            -- Empirical weights: they say a query word found in a title counts
+                            -- for more than one found in the body, and were arrived at by
+                            -- measurement rather than derivation. Re-run `make eval` if you
+                            -- change them; there is no theory here to reason from.
                             SELECT
                                 0.45 * avg((position(t in lower(coalesce(d.title, ''))) > 0)::int)
                               + 0.35 * avg((position(t in lower(coalesce(d.source_path, ''))) > 0)::int)
@@ -498,25 +513,37 @@ class Retriever:
         """
         with self.db.connection() as conn, stage("search_sql"):
             rows = conn.execute(sql, params).fetchall()
-        return [
-            ChunkResult(
-                id=str(row["id"]),
-                document_id=str(row["document_id"]),
-                document_title=row["document_title"],
-                source_path=row["source_path"],
-                chunk_index=row["chunk_index"],
-                content=row["content"],
-                start_char=row["start_char"],
-                end_char=row["end_char"],
-                effective_at=row["effective_at"],
-                metadata=dict(row["metadata"]),
-                semantic_score=float(row["semantic_score"]),
-                lexical_score=float(row["lexical_score"]),
-                recency_score=float(row["recency_score"]),
-                score=float(row["score"]),
-            )
-            for row in rows
-        ]
+        return [_chunk_from_row(row) for row in rows]
+
+    def _search_params(
+        self,
+        query: str,
+        query_embedding: np.ndarray,
+        profile_hash: str,
+        limit: int,
+        project: str | None,
+        since: datetime | None,
+        until: datetime | None,
+        per_signal: int,
+    ) -> dict[str, Any]:
+        return {
+            "embedding": query_embedding,
+            "query": query,
+            "profile_hash": profile_hash,
+            "limit": limit,
+            "per_signal": per_signal,
+            "semantic_weight": self.settings.semantic_weight,
+            "lexical_weight": self.settings.lexical_weight,
+            "recency_weight": self.settings.recency_weight,
+            "rrf_k": self.settings.rrf_k,
+            "terms": query_terms(query),
+            "half_life": self.settings.recency_half_life_days,
+            "min_semantic_score": self.settings.min_semantic_score,
+            "scoring_pool": self.settings.scoring_pool_chunks,
+            "project": project,
+            "since": since,
+            "until": until,
+        }
 
     def _documents_for_chunks(
         self, chunks: list[ChunkResult], limit: int, include_content: bool

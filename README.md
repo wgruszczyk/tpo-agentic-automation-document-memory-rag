@@ -30,6 +30,54 @@ into repositories where Codex works, as `AGENTS.md`.
 
 `retrieve_knowledge`, `search` and `list_documents` accept optional `since` and `until` ISO dates.
 
+## How It Works
+
+Two loops, sharing one database.
+
+**Ingestion** runs every 30 seconds and owns everything up to the stored vector. It walks
+`knowledge/`, extracts text from each file — including OCR for pictures and for images embedded in
+PDFs and Office documents — and reads whatever metadata the file can be trusted to state, chiefly a
+date. Files are deduplicated on a checksum of their *parsed* text, so the same document arriving by
+two paths is indexed once. What survives is split into overlapping chunks, each chunk is embedded,
+and the vectors land in Postgres. An extraction cache keyed on size and modification time means an
+unchanged file is never OCR'd twice.
+
+Anything that changes what an embedding *means* — the model, its revision, the dimension, the chunk
+size — is hashed into an **index fingerprint**. On startup the service compares the fingerprint it
+would produce now against the one stored with the index, and rebuilds everything if they differ.
+That single mechanism is what makes changing a model safe, and also what makes it expensive.
+
+**Retrieval** answers a question in five stages, each timed and visible in Grafana:
+
+| Stage | What it does |
+|---|---|
+| `embed_query` | Turns the question into a vector using the model that indexed the corpus. |
+| `search_sql` | One statement scores chunks on three signals and returns a candidate pool. |
+| `rerank` | A cross-encoder rereads the shortlist with the question attached, and reorders it. |
+| `documents` | Expands the surviving chunks into whole documents. |
+| `compress` | Packs the result into a character-budgeted block that preserves source ids. |
+
+The three signals are **meaning** (cosine distance to the query vector), **wording** (full-text and
+trigram matching over title, path, metadata and content) and **recency** (exponential decay on the
+document's effective date). They are fused by *rank* rather than by value, because a cosine distance
+and a text rank do not share a scale — adding them directly would let whichever scale happens to be
+wider decide the order.
+
+Two ideas do most of the work in that stage. A **semantic floor** discards chunks below a similarity
+threshold before anything else is weighed, and it ignores recency and keyword overlap deliberately,
+so a five-year-old clause that genuinely answers the question still surfaces. And because comparing
+the question against a chunk's full text costs more than every other signal combined, that
+comparison runs only on chunks the cheaper signals already ranked highly.
+
+**Reranking** exists because search compares the question against a summary of each passage written
+before the question existed, so a passage that merely *discusses* the subject can outrank the one
+that answers it. Reading both together fixes that, but is far too slow to search with — hence the
+shortlist. The reranker then gets a vote rather than a veto, fused with the retrieval order, because
+it never sees titles or paths and would otherwise lose questions that name a document.
+
+Neither loop calls out to the internet, and no answer is generated: the service returns sources and
+leaves the reasoning to whichever agent asked.
+
 ## Architecture
 
 ```mermaid

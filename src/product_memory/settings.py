@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     embedding_revision: str | None = None
     embedding_dimensions: int | None = Field(default=None, ge=1)
     embedding_batch_size: int = Field(default=16, ge=1, le=256)
+    # torch.set_num_threads is process-wide, so this and reranker_threads cannot differ in
+    # practice: whichever model loads last wins. Measured here, throughput stopped improving
+    # around 8 threads regardless of how many cores were available.
     local_embedding_threads: int = Field(default=4, ge=1)
     hf_home: Path = Path("/models/huggingface")
 
@@ -99,6 +102,7 @@ class Settings(BaseSettings):
     # better on generated probes and worse on written questions, and cost twice the latency. The
     # generated set rewards seeing further into a chunk for its own sake, so 192 stands.
     reranker_max_length: int = Field(default=192, ge=64, le=2048)
+    # Shares one process-wide setting with local_embedding_threads; see the note there.
     reranker_threads: int = Field(default=8, ge=1)
     # Fused against the shortlist it was given, so retrieval keeps a say. Much smaller than
     # rrf_k because it fuses two orderings of a few hundred rows, not of the whole index.
