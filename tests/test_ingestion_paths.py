@@ -40,6 +40,16 @@ def test_root_readme_does_not_count_as_a_real_document(tmp_path: Path) -> None:
     assert _relative_paths(_service(tmp_path), tmp_path) == ["example-knowledge.md"]
 
 
+def test_office_lock_files_are_never_indexed(tmp_path: Path) -> None:
+    # Office writes these beside a document while it is open. They carry the extension of a
+    # presentation but hold no package, so reading one can only ever fail.
+    _write(tmp_path / "deck.pptx")
+    _write(tmp_path / "~$deck.pptx")
+    _write(tmp_path / "minutes" / "~$notes.docx")
+
+    assert _relative_paths(_service(tmp_path), tmp_path) == ["deck.pptx"]
+
+
 def test_discovers_files_inside_symlinked_directories(tmp_path: Path) -> None:
     knowledge_dir = tmp_path / "knowledge"
     external_dir = tmp_path / "external-teams"

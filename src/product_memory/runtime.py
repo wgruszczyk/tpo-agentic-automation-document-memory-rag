@@ -10,7 +10,13 @@ from product_memory.ingestion.cache import ExtractionCache
 from product_memory.ingestion.chunker import DocumentChunker
 from product_memory.ingestion.parser import DocumentParser
 from product_memory.ingestion.service import IngestionService
-from product_memory.metrics import INDEX_BYTES, INDEX_CHUNKS, INDEX_DOCUMENTS, INDEX_SKIPPED
+from product_memory.metrics import (
+    INDEX_BYTES,
+    INDEX_CHUNKS,
+    INDEX_DOCUMENTS,
+    INDEX_FAILED,
+    INDEX_SKIPPED,
+)
 from product_memory.retrieval.compressor import ContextCompressor
 from product_memory.retrieval.reranker import Reranker
 from product_memory.retrieval.service import Retriever
@@ -93,3 +99,4 @@ class Runtime:
         INDEX_CHUNKS.set(totals["chunks"])
         INDEX_BYTES.set(totals["bytes"])
         INDEX_SKIPPED.set(self.ingestion.skipped_documents().get("count", 0))
+        INDEX_FAILED.set(self.ingestion.failed_documents().get("count", 0))

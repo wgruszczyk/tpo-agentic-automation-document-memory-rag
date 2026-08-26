@@ -77,6 +77,13 @@ def skipped() -> None:
     print_json(json.dumps(runtime.ingestion.skipped_documents(), default=str))
 
 
+@app.command("failures")
+def failures() -> None:
+    """List the knowledge files that could not be read, with the error for each."""
+    runtime = ready_runtime()
+    print_json(json.dumps(runtime.ingestion.failed_documents(), default=str))
+
+
 @app.command("warmup")
 def warmup() -> None:
     """Download the embedding and reranker models into the cache, and report their revisions.

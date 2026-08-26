@@ -75,6 +75,12 @@ INDEX_SKIPPED = Gauge(
     registry=REGISTRY,
 )
 
+INDEX_FAILED = Gauge(
+    "product_memory_index_failed_documents",
+    "Knowledge files that could not be read at all.",
+    registry=REGISTRY,
+)
+
 INDEX_BYTES = Gauge(
     "product_memory_index_bytes",
     "Disk used by the documents and chunks relations.",

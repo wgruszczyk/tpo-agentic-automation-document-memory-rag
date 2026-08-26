@@ -10,7 +10,11 @@ from dateutil import parser as date_parser
 
 from product_memory.db import Database
 from product_memory.embeddings.base import EmbeddingProvider
-from product_memory.ingestion.service import INDEX_STATE_KEY, SKIPPED_STATE_KEY
+from product_memory.ingestion.service import (
+    FAILED_STATE_KEY,
+    INDEX_STATE_KEY,
+    SKIPPED_STATE_KEY,
+)
 from product_memory.metrics import RESULT_COUNT, stage
 from product_memory.models import (
     ChunkResult,
@@ -293,6 +297,7 @@ class Retriever:
     def status(self) -> dict[str, Any]:
         profile = self.db.get_state(INDEX_STATE_KEY) or {"status": "not_initialized"}
         skipped = self.db.get_state(SKIPPED_STATE_KEY) or {}
+        failed = self.db.get_state(FAILED_STATE_KEY) or {}
         with self.db.connection() as conn:
             counts = conn.execute(
                 """
@@ -308,6 +313,7 @@ class Retriever:
             "documents": counts["documents"],
             "chunks": counts["chunks"],
             "skipped_documents": skipped.get("count", 0),
+            "failed_documents": failed.get("count", 0),
             "latest_document_update": counts["latest_document_update"].isoformat()
             if counts["latest_document_update"]
             else None,

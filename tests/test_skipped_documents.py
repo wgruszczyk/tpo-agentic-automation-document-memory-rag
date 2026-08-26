@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import Any
+from unittest.mock import ANY
 
 from product_memory.ingestion.extractors import UnreadableDocumentError
 from product_memory.ingestion.parser import EmptyDocumentError
@@ -80,6 +81,48 @@ def test_an_unchanged_skip_list_is_neither_rewritten_nor_logged_again(caplog: An
 
 def test_skipped_documents_reports_an_empty_list_before_the_first_scan() -> None:
     assert _service(StateDatabase()).skipped_documents() == {"count": 0, "documents": []}
+
+
+def test_unreadable_files_are_recorded_and_reported_once(caplog: Any) -> None:
+    db = StateDatabase()
+    service = _service(db)
+    failures = {"broken.pptx": "PackageNotFoundError: Package not found"}
+
+    with caplog.at_level(logging.WARNING):
+        service._record_failures(failures)  # noqa: SLF001
+        service._record_failures(failures)  # noqa: SLF001
+
+    assert service.failed_documents()["count"] == 1
+    assert db.writes == 1
+    # A file that cannot be read stays unreadable, so it is news exactly once.
+    assert len(caplog.records) == 1
+    assert "could not be read" in caplog.text
+
+
+def test_a_resolved_failure_is_reported_and_forgotten() -> None:
+    db = StateDatabase()
+    service = _service(db)
+    service._record_failures({"broken.pptx": "PackageNotFoundError: gone"})  # noqa: SLF001
+
+    changed = service._record_document_reasons("failed_documents", {})  # noqa: SLF001
+
+    assert changed == (0, 0, 1)
+    assert service.failed_documents() == {"count": 0, "documents": [], "updated_at": ANY}
+
+
+def test_failures_and_skips_are_kept_apart() -> None:
+    db = StateDatabase()
+    service = _service(db)
+
+    service._record_skipped({"photo.png": "Document has no extractable text"})  # noqa: SLF001
+    service._record_failures({"broken.pptx": "PackageNotFoundError: gone"})  # noqa: SLF001
+
+    assert [entry["source_path"] for entry in service.skipped_documents()["documents"]] == [
+        "photo.png"
+    ]
+    assert [entry["source_path"] for entry in service.failed_documents()["documents"]] == [
+        "broken.pptx"
+    ]
 
 
 def test_a_report_is_rendered_as_an_indented_yaml_block() -> None:

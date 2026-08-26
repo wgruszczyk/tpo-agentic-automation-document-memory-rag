@@ -68,6 +68,7 @@ make query q='What did we decide about payment retries?'
 | `make logs` | Follow service logs. |
 | `make ingest` | Run one scan now. |
 | `make skipped` | Files holding no indexable text, and why each was left out. |
+| `make failures` | Files that could not be read at all, and the error for each. |
 | `make warmup` | Download the models and print the revisions to pin. |
 | `make eval` | Score retrieval against your question set. |
 | `make generate-eval` | Build a question set from your own documents. |
@@ -153,6 +154,29 @@ OCR_TIMEOUT_SECONDS=30
 `OCR_MIN_CHARACTERS` discards recognition noise. An image with no readable text is reported as
 skipped rather than failing. The image ships `eng` and `pol`; add more `tesseract-ocr-*` packages in
 the `Dockerfile` and list them in `OCR_LANGUAGES`.
+
+## When Files Do Not Appear
+
+Two lists explain almost everything:
+
+```bash
+make skipped    # readable, but held no indexable text
+make failures   # could not be read at all, with the error
+```
+
+Skipped is normal — pictures without text, empty files, password-protected workbooks. Each is
+recorded once and reported only when the list changes, rather than on every scan.
+
+Failures usually mean one of these:
+
+- **`OSError: [Errno 35] Resource deadlock avoided`** — a cloud placeholder. iCloud Drive and
+  OneDrive keep files "online only" until something opens them in Finder, and a Docker bind mount
+  cannot trigger that download. Set the folder to *Always Keep on This Device* and the next scan
+  will pick the files up; nothing needs reindexing by hand.
+- **A corrupt or truncated file**, which will keep failing until it is replaced.
+
+Files whose name begins with `~$` are never read: Office writes those beside a document while it is
+open, and they carry a real extension while holding no document.
 
 ## Retrieval
 
