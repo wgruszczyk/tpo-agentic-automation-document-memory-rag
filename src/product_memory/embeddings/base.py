@@ -6,6 +6,15 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
+def passage_text(title: str, content: str) -> str:
+    """Exactly what gets embedded for a chunk.
+
+    Anything comparing against stored vectors has to build its input the same way; embedding the
+    bare content instead silently handicaps whatever is being compared.
+    """
+    return f"Title: {title}\n\n{content}"
+
+
 class EmbeddingProvider(ABC):
     @abstractmethod
     def embed_documents(self, texts: list[str]) -> list[list[float]]:

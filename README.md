@@ -71,6 +71,7 @@ make query q='What did we decide about payment retries?'
 | `make warmup` | Download the models and print the revisions to pin. |
 | `make eval` | Score retrieval against your question set. |
 | `make generate-eval` | Build a question set from your own documents. |
+| `make compare-embeddings` | Judge another embedding model without re-embedding the index. |
 | `make observability` | Start Prometheus, Loki, Promtail and Grafana. |
 | `make metrics` | Print the raw Prometheus scrape output. |
 | `make reindex` | Rebuild embeddings from stored documents. |
@@ -357,6 +358,26 @@ Read-only, returning up to 500 documents with chunk previews and embedding summa
 
 ## Change Embeddings
 
+Changing provider, model, revision, dimensions, prefixes, chunk size or chunk overlap changes the
+index fingerprint and triggers a full reindex. That reindex re-embeds every chunk, runs for as long
+as the original build took, and holds the service down while it does — so judge a candidate first:
+
+```bash
+make compare-embeddings model=intfloat/multilingual-e5-large
+```
+
+This scores the candidate against the model currently in use, on your own question set, without
+re-embedding the index. Only the candidate embeds anything; the current model's vectors are read
+back from the index. It ranks by cosine alone, which isolates what the embedding actually decides
+and ignores the lexical signal, the recency boost and the reranker downstream. A candidate that
+separates no better here will not repay a full reindex. Use `args='--distractors 4000'` for a
+harder, slower pool.
+
+Bigger is not reliably better. Measured this way on one private corpus, `multilingual-e5-large`
+scored *below* `multilingual-e5-base` despite being three times the size and slower to run.
+
+Remote OpenAI-compatible embeddings:
+
 ```dotenv
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=text-embedding-3-small
@@ -364,9 +385,7 @@ EMBEDDING_DIMENSIONS=1536
 OPENAI_API_KEY=...
 ```
 
-Changing provider, model, revision, dimensions, prefixes, chunk size or chunk overlap changes the
-index fingerprint and triggers a full reindex. With a remote provider, chunk content is sent to the
-embedding endpoint.
+With a remote provider, chunk content is sent to the embedding endpoint.
 
 ## Backup And Reset
 

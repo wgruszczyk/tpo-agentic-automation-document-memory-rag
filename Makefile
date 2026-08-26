@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped warmup observability observability-stop grafana prometheus metrics ingest reindex rebuild smoke query eval generate-eval link-knowledge test clean reset-data
+.PHONY: start stop restart logs status skipped warmup observability observability-stop grafana prometheus metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -84,6 +84,11 @@ eval:
 generate-eval:
 	$(COMPOSE) exec -T product-memory product-memory generate-eval $(args) > eval/questions.generated.yaml
 	@echo "Wrote eval/questions.generated.yaml"
+
+# Judges another embedding model against the current one without re-embedding the index.
+# Usage: make compare-embeddings model=intfloat/multilingual-e5-large
+compare-embeddings:
+	$(COMPOSE) exec product-memory product-memory compare-embeddings --model "$(model)" $(args)
 
 link-knowledge:
 	@test -f .env || cp .env.example .env

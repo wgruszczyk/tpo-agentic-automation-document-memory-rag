@@ -124,6 +124,48 @@ def generate_eval(
     )
 
 
+@app.command("compare-embeddings")
+def compare_embeddings(
+    model: str = typer.Option(..., help="The candidate embedding model to judge."),
+    revision: str = typer.Option("", help="Pin the candidate to a Hugging Face commit."),
+    questions: str = typer.Option("/eval/questions.yaml", help="Question set to score against."),
+    distractors: int = typer.Option(1000, min=0, max=100000, help="Unrelated chunks in the pool."),
+    top_k: int = typer.Option(7, min=1, max=50, help="Documents each question may return."),
+) -> None:
+    """Judge a candidate embedding model without re-embedding the whole index.
+
+    Only the candidate embeds anything; the current model's vectors are read from the index. Scores
+    on cosine alone, so it isolates the embedding and ignores the lexical, recency and reranking
+    stages that follow. Run it before paying for a full reindex.
+    """
+    from product_memory.embedding_probe import compare_embedding_models
+    from product_memory.embeddings.factory import create_embedding_provider
+    from product_memory.evaluation import load_cases
+    from product_memory.settings import get_settings
+
+    path = Path(questions)
+    if not path.exists():
+        raise typer.BadParameter(f"{path} does not exist. Run 'product-memory generate-eval' first.")
+
+    runtime = ready_runtime()
+    candidate_settings = get_settings().model_copy(
+        update={
+            "embedding_model": model,
+            "embedding_revision": revision or None,
+            "allow_model_download": True,
+        }
+    )
+    report = compare_embedding_models(
+        runtime.db,
+        current=runtime.provider,
+        candidate=create_embedding_provider(candidate_settings),
+        cases=load_cases(path),
+        distractors=distractors,
+        top_k=top_k,
+    )
+    print_json(json.dumps(report, default=str))
+
+
 @app.command("smoke-test")
 def smoke_test(url: str = "http://127.0.0.1:2600/mcp") -> None:
     """Connect through MCP, list tools, and execute a real retrieval against the sample knowledge."""

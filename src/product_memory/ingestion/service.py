@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from product_memory.db import Database
-from product_memory.embeddings.base import EmbeddingProvider
+from product_memory.embeddings.base import EmbeddingProvider, passage_text
 from product_memory.ingestion.chunker import DocumentChunker
 from product_memory.ingestion.extractors import UnreadableDocumentError
 from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError, ParsedDocument
@@ -406,7 +406,7 @@ class IngestionService:
         self, document_id, title: str, content: str, profile_hash: str
     ) -> int:  # type: ignore[no-untyped-def]
         chunks = self.chunker.split(content)
-        passage_texts = [f"Title: {title}\n\n{chunk.content}" for chunk in chunks]
+        passage_texts = [passage_text(title, chunk.content) for chunk in chunks]
         embeddings = self.provider.embed_documents(passage_texts)
         if len(embeddings) != len(chunks):
             raise RuntimeError("Embedding provider returned a different number of vectors than input chunks")
