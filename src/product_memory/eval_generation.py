@@ -18,7 +18,7 @@ _ANSWER_GRADE = 3
 @dataclass(slots=True)
 class GeneratedCase:
     question: str
-    source_path: str
+    source_paths: list[str]
     document_id: str
     chunk_id: str
     salience: float
@@ -174,7 +174,7 @@ def generate_cases(
     # Oversample, because a document can fail to yield a usable passage.
     documents = _sample_documents(db, count * 3, seed, project=None)
 
-    cases: list[GeneratedCase] = []
+    cases: dict[str, GeneratedCase] = {}
     for document in documents:
         if len(cases) == count:
             break
@@ -194,16 +194,24 @@ def generate_cases(
         terms = _salient_terms(sentence, vocabulary, terms_per_question)
         if len(terms) < max(3, terms_per_question // 2):
             continue
-        cases.append(
-            GeneratedCase(
-                question=" ".join(terms),
-                source_path=document["source_path"],
-                document_id=str(document["id"]),
-                chunk_id=str(chunk["id"]),
-                salience=round(sum(vocabulary.weight(token) for token in terms) / len(terms), 3),
-            )
+
+        question = " ".join(terms)
+        existing = cases.get(question)
+        if existing is not None:
+            # Successive drafts of one document share their most distinctive sentence. Asking the
+            # same question once per copy would mark every copy but one a miss, when in truth any
+            # of them answers it.
+            existing.source_paths.append(document["source_path"])
+            continue
+
+        cases[question] = GeneratedCase(
+            question=question,
+            source_paths=[document["source_path"]],
+            document_id=str(document["id"]),
+            chunk_id=str(chunk["id"]),
+            salience=round(sum(vocabulary.weight(token) for token in terms) / len(terms), 3),
         )
-    return cases
+    return list(cases.values())
 
 
 def render_yaml(cases: list[GeneratedCase], seed: str) -> str:
@@ -228,10 +236,11 @@ def render_yaml(cases: list[GeneratedCase], seed: str) -> str:
     ]
     for case in cases:
         question = case.question.replace('"', '\\"')
-        path = case.source_path.replace('"', '\\"')
         lines.append(f'- question: "{question}"')
         lines.append("  expect:")
-        lines.append(f'    - path: "{path}"')
-        lines.append(f"      grade: {_ANSWER_GRADE}")
+        for source_path in case.source_paths:
+            path = source_path.replace('"', '\\"')
+            lines.append(f'    - path: "{path}"')
+            lines.append(f"      grade: {_ANSWER_GRADE}")
         lines.append("")
     return "\n".join(lines)

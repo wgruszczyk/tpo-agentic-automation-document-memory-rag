@@ -124,11 +124,8 @@ def generate_eval(
     # The questions go to stdout so the caller decides where they land; the knowledge and eval
     # folders are mounted read-only on purpose.
     typer.echo(render_yaml(cases, seed))
-    typer.echo(
-        f"Generated {len(cases)} questions from "
-        f"{len({case.source_path for case in cases})} documents.",
-        err=True,
-    )
+    documents = {path for case in cases for path in case.source_paths}
+    typer.echo(f"Generated {len(cases)} questions from {len(documents)} documents.", err=True)
 
 
 @app.command("compare-embeddings")

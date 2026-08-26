@@ -76,7 +76,7 @@ def test_rendered_yaml_grades_the_source_document_and_warns_against_committing()
         [
             GeneratedCase(
                 question='payment "terms" annex',
-                source_path="contracts/annex.pdf",
+                source_paths=["contracts/annex.pdf"],
                 document_id="doc-1",
                 chunk_id="chunk-1",
                 salience=4.2,
@@ -101,7 +101,7 @@ def test_rendered_yaml_parses_back_into_graded_cases(tmp_path) -> None:
             [
                 GeneratedCase(
                     question="settlement reconciliation",
-                    source_path="finance/ledger.xlsx",
+                    source_paths=["finance/ledger.xlsx"],
                     document_id="doc-1",
                     chunk_id="chunk-1",
                     salience=3.0,
@@ -117,6 +117,35 @@ def test_rendered_yaml_parses_back_into_graded_cases(tmp_path) -> None:
     assert cases[0].question == "settlement reconciliation"
     assert cases[0].expect[0].fragment == "finance/ledger.xlsx"
     assert cases[0].expect[0].grade == 3
+
+
+def test_a_question_several_documents_answer_lists_them_all(tmp_path) -> None:
+    from product_memory.evaluation import load_cases
+
+    path = tmp_path / "merged.yaml"
+    path.write_text(
+        render_yaml(
+            [
+                GeneratedCase(
+                    question="settlement reconciliation",
+                    # Successive drafts share their most distinctive sentence, and any of them
+                    # answers it; one question per copy would mark all but one a miss.
+                    source_paths=["finance/ledger-v1.xlsx", "finance/ledger-v2.xlsx"],
+                    document_id="doc-1",
+                    chunk_id="chunk-1",
+                    salience=3.0,
+                )
+            ],
+            seed="unit-test",
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_cases(path)
+
+    assert len(cases) == 1
+    assert cases[0].fragments == ["finance/ledger-v1.xlsx", "finance/ledger-v2.xlsx"]
+    assert [item.grade for item in cases[0].expect] == [3, 3]
 
 
 def test_sampling_visits_every_folder_in_proportion_to_its_size() -> None:
