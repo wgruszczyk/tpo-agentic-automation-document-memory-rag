@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     # json emits one object per line for Loki; rich stays readable in a terminal.
     log_format: Literal["rich", "json"] = "rich"
+    # Empty means evaluations are not recorded anywhere.
+    mlflow_tracking_uri: str = ""
 
     @field_validator(
         "embedding_revision",

@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped warmup observability observability-stop grafana prometheus metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test clean reset-data
+.PHONY: start stop restart logs status skipped warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -42,15 +42,19 @@ observability:
 	$(COMPOSE) --profile observability up -d
 	@echo "Grafana    http://localhost:$${GRAFANA_PORT:-2601}"
 	@echo "Prometheus http://localhost:$${PROMETHEUS_PORT:-2602}"
+	@echo "MLflow     http://localhost:$${MLFLOW_PORT:-2604}"
 
 observability-stop:
-	$(COMPOSE) --profile observability stop grafana prometheus loki promtail
+	$(COMPOSE) --profile observability stop grafana prometheus loki promtail mlflow
 
 grafana:
 	open http://localhost:$${GRAFANA_PORT:-2601}
 
 prometheus:
 	open http://localhost:$${PROMETHEUS_PORT:-2602}
+
+mlflow:
+	open http://localhost:$${MLFLOW_PORT:-2604}
 
 # Raw scrape output, useful when a dashboard panel is empty and you need to know why.
 metrics:

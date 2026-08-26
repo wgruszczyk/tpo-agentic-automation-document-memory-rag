@@ -72,7 +72,7 @@ make query q='What did we decide about payment retries?'
 | `make eval` | Score retrieval against your question set. |
 | `make generate-eval` | Build a question set from your own documents. |
 | `make compare-embeddings` | Judge another embedding model without re-embedding the index. |
-| `make observability` | Start Prometheus, Loki, Promtail and Grafana. |
+| `make observability` | Start Prometheus, Loki, Promtail, Grafana and MLflow. |
 | `make metrics` | Print the raw Prometheus scrape output. |
 | `make reindex` | Rebuild embeddings from stored documents. |
 | `make rebuild` | Re-read every file from disk. Use after an extraction change, such as new OCR support. |
@@ -267,6 +267,29 @@ Use `args='--verbose'` for per-question detail and `args='--top-k 3'` for a stri
 `eval/questions.yaml` and `eval/questions.generated.yaml` are gitignored, because real questions and
 document names are usually confidential.
 
+### Recording runs
+
+Comparing two evaluations by hand stops working after about the third one. With the observability
+stack up, add `--track` and each run is recorded in MLflow:
+
+```bash
+make eval args="--track --run-name baseline"
+make eval args="--track --run-name wider-pool"
+```
+
+Each run captures every setting that can move a score — both models and their resolved revisions,
+the embedding dimension, chunk size and overlap, all ranking weights and pools — alongside hit rate,
+MRR, recall, precision, nDCG and latency percentiles. The index fingerprint is recorded as a tag, so
+runs scored against different indexes are distinguishable, and the full per-question report is
+attached as an artifact for diagnosing a regression later.
+
+Open <http://localhost:2604>, select the runs, and use *Compare*. If MLflow is unreachable the
+evaluation still prints its result: a tracking failure should not throw away a run you have already
+paid for.
+
+MLflow keeps its own SQLite database and artifacts in the `mlflow_data` volume, not in Postgres, so
+`pg_dump` does not cover them. Those artifacts contain your questions and document paths.
+
 ## Observability
 
 Metrics, dashboards and log browsing run as a separate Compose profile. Set a Grafana password and
@@ -287,6 +310,7 @@ make observability
 | Grafana | <http://localhost:2601> | Dashboards and log browsing. |
 | Prometheus | <http://localhost:2602> | Raw metric queries and scrape health. |
 | Loki | <http://localhost:2603> | Log store. Query it through Grafana. |
+| MLflow | <http://localhost:2604> | Evaluation runs, compared over time. |
 
 All bind to `127.0.0.1` only. The ports avoid the conventional 3000 and 5000 because macOS runs
 AirPlay Receiver on 5000.

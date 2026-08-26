@@ -233,6 +233,9 @@ def evaluate(
     ),
     top_k: int = typer.Option(7, min=1, max=25, help="How many documents each question may return."),
     verbose: bool = typer.Option(False, help="Print the ranked documents for every question."),
+    track: bool = typer.Option(False, help="Record the run in MLflow for later comparison."),
+    experiment: str = typer.Option("product-memory", help="MLflow experiment to record under."),
+    run_name: str = typer.Option("", help="Name this run, so it is recognisable in MLflow."),
 ) -> None:
     """Score retrieval against a question set and report hit rate and mean reciprocal rank."""
     from product_memory.evaluation import load_cases, run_evaluation
@@ -244,6 +247,24 @@ def evaluate(
         )
     runtime = ready_runtime()
     report = run_evaluation(runtime.retriever, load_cases(path), top_k)
+
+    if track:
+        from product_memory.tracking import log_evaluation
+
+        if not runtime.settings.mlflow_tracking_uri:
+            raise typer.BadParameter(
+                "--track needs MLFLOW_TRACKING_URI. Start MLflow with 'make observability'."
+            )
+        run_id = log_evaluation(
+            report,
+            settings=runtime.settings,
+            index_profile=runtime.retriever.status().get("profile", {}),
+            experiment=experiment,
+            run_name=run_name or None,
+            questions=path.name,
+        )
+        report["mlflow_run_id"] = run_id
+
     if not verbose:
         report.pop("results")
     print_json(json.dumps(report, default=str))

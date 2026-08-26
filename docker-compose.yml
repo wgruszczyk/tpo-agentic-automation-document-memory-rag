@@ -117,6 +117,29 @@ services:
       - prometheus
       - loki
 
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.19.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    # SQLite rather than the Postgres next door: the official image ships no psycopg2, and
+    # installing one at startup would put a network call in the boot path.
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - sqlite:////mlflow/mlflow.db
+      - --artifacts-destination
+      - /mlflow/artifacts
+      - --serve-artifacts
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+    volumes:
+      - mlflow_data:/mlflow
+    ports:
+      - "127.0.0.1:${MLFLOW_PORT:-2604}:5000"
+
 volumes:
   postgres_data:
     name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_postgres_data
@@ -126,3 +149,4 @@ volumes:
   loki_data:
   promtail_data:
   grafana_data:
+  mlflow_data:
