@@ -99,16 +99,31 @@ def _best_sentence(content: str, vocabulary: Vocabulary, min_terms: int) -> str 
 
 
 def _sample_documents(db: Database, count: int, seed: str, project: str | None) -> list[dict]:
+    """Documents in a shuffled order that still visits every top-level folder proportionally.
+
+    Ordering the whole corpus at random lets the largest folder fill the sample before a small
+    linked one is reached, and a regression net that never touches a folder is not guarding it.
+    Ranking within each folder and ordering on that rank as a fraction interleaves them: take any
+    prefix of this order and each folder appears in proportion to its size.
+    """
     project_clause = "AND d.metadata->>'project' = %(project)s" if project else ""
     with db.connection() as conn:
         rows = conn.execute(
             f"""
-            SELECT d.id, d.source_path, d.title
-            FROM documents d
-            WHERE d.is_active = TRUE
-              AND EXISTS (SELECT 1 FROM chunks c WHERE c.document_id = d.id)
-              {project_clause}
-            ORDER BY md5(d.id::text || %(seed)s)
+            WITH candidate AS (
+                SELECT d.id, d.source_path, d.title,
+                       split_part(d.source_path, '/', 1) AS folder
+                FROM documents d
+                WHERE d.is_active = TRUE
+                  AND EXISTS (SELECT 1 FROM chunks c WHERE c.document_id = d.id)
+                  {project_clause}
+            )
+            SELECT id, source_path, title
+            FROM candidate
+            ORDER BY
+                (row_number() OVER (PARTITION BY folder ORDER BY md5(id::text || %(seed)s)) - 1)
+                    ::float / count(*) OVER (PARTITION BY folder),
+                folder
             LIMIT %(count)s
             """,
             {"seed": seed, "count": count, "project": project},

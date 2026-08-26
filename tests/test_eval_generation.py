@@ -117,3 +117,33 @@ def test_rendered_yaml_parses_back_into_graded_cases(tmp_path) -> None:
     assert cases[0].question == "settlement reconciliation"
     assert cases[0].expect[0].fragment == "finance/ledger.xlsx"
     assert cases[0].expect[0].grade == 3
+
+
+def test_sampling_visits_every_folder_in_proportion_to_its_size() -> None:
+    from contextlib import contextmanager
+
+    from product_memory.eval_generation import _sample_documents
+
+    captured: dict[str, str] = {}
+
+    class Cursor:
+        def fetchall(self) -> list:
+            return []
+
+    class Connection:
+        def execute(self, sql: str, params: dict) -> Cursor:
+            captured["sql"] = sql
+            return Cursor()
+
+    class Db:
+        @contextmanager
+        def connection(self):
+            yield Connection()
+
+    _sample_documents(Db(), count=10, seed="s", project=None)  # type: ignore[arg-type]
+
+    # Ranking within a folder and ordering on that rank as a fraction of the folder's size means
+    # any prefix holds each folder in proportion; a flat random order lets the largest one win.
+    assert "PARTITION BY folder" in captured["sql"]
+    assert "::float / count(*) OVER (PARTITION BY folder)" in captured["sql"]
+    assert "split_part(d.source_path, '/', 1) AS folder" in captured["sql"]
