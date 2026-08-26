@@ -48,6 +48,29 @@ def _format_report(report: dict[str, Any], indent: int = 2) -> str:
     return "\n".join(lines)
 
 
+class FailureReporter:
+    """Decides how loudly a file that could not be read should be reported.
+
+    A stack trace earns its space the first time a fault appears and not the hundredth. An
+    unreadable file stays unreadable, so repeating it every scan says nothing new, and when a
+    whole folder fails the same way the traces differ only in the path.
+    """
+
+    def __init__(self, already_known: dict[str, str]):
+        self._already_known = already_known
+        self._reported_reasons: set[str] = set()
+
+    def report(self, path: Path, source_path: str, reason: str) -> None:
+        if self._already_known.get(source_path) == reason:
+            return
+        if reason in self._reported_reasons:
+            LOGGER.warning("Failed to ingest %s: %s", path, reason)
+            return
+        self._reported_reasons.add(reason)
+        # Only meaningful while an exception is being handled, which is the only caller.
+        LOGGER.exception("Failed to ingest %s", path)
+
+
 class IngestionService:
     def __init__(
         self,
@@ -171,6 +194,7 @@ class IngestionService:
             entry["source_path"]: entry["reason"]
             for entry in self.failed_documents().get("documents", [])
         }
+        failures = FailureReporter(known_failures)
 
         for path in paths:
             relative_path = self._relative_source_path(root, path)
@@ -184,10 +208,7 @@ class IngestionService:
             except Exception as error:
                 reason = f"{type(error).__name__}: {error}"
                 failed_documents[relative_path] = reason
-                # A file that fails to parse will fail again on the next scan, so the traceback
-                # is worth one telling rather than one every scan interval forever.
-                if known_failures.get(relative_path) != reason:
-                    LOGGER.exception("Failed to ingest %s", path)
+                failures.report(path, relative_path, reason)
 
         self._record_skipped(skipped_documents)
         self._record_failures(failed_documents)

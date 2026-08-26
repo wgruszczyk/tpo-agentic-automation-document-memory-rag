@@ -7,6 +7,7 @@ from product_memory.ingestion.extractors import UnreadableDocumentError
 from product_memory.ingestion.parser import EmptyDocumentError
 from product_memory.ingestion.service import (
     SKIPPED_STATE_KEY,
+    FailureReporter,
     IngestionService,
     _format_report,
     _skip_reason,
@@ -123,6 +124,64 @@ def test_failures_and_skips_are_kept_apart() -> None:
     assert [entry["source_path"] for entry in service.failed_documents()["documents"]] == [
         "broken.pptx"
     ]
+
+
+def _fail(reporter: FailureReporter, source_path: str, reason: str) -> None:
+    try:
+        raise OSError(reason)
+    except OSError:
+        reporter.report(Path("/knowledge") / source_path, source_path, reason)
+
+
+def test_a_new_fault_is_reported_with_its_stack(caplog: Any) -> None:
+    reporter = FailureReporter({})
+
+    with caplog.at_level(logging.WARNING):
+        _fail(reporter, "a.pdf", "cloud placeholder")
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].exc_info is not None
+
+
+def test_the_same_fault_on_another_file_is_named_without_its_stack(caplog: Any) -> None:
+    reporter = FailureReporter({})
+
+    with caplog.at_level(logging.WARNING):
+        _fail(reporter, "a.pdf", "cloud placeholder")
+        _fail(reporter, "b.pdf", "cloud placeholder")
+        _fail(reporter, "c.pdf", "cloud placeholder")
+
+    # A whole folder failing the same way produces traces that differ only in the path.
+    assert len(caplog.records) == 3
+    assert [record.exc_info is not None for record in caplog.records] == [True, False, False]
+
+
+def test_a_different_fault_earns_its_own_stack(caplog: Any) -> None:
+    reporter = FailureReporter({})
+
+    with caplog.at_level(logging.WARNING):
+        _fail(reporter, "a.pdf", "cloud placeholder")
+        _fail(reporter, "b.pptx", "no package found")
+
+    assert [record.exc_info is not None for record in caplog.records] == [True, True]
+
+
+def test_a_failure_already_on_record_is_not_reported_again(caplog: Any) -> None:
+    reporter = FailureReporter({"a.pdf": "OSError: cloud placeholder"})
+
+    with caplog.at_level(logging.WARNING):
+        reporter.report(Path("/knowledge/a.pdf"), "a.pdf", "OSError: cloud placeholder")
+
+    assert caplog.records == []
+
+
+def test_a_failure_that_changed_its_reason_is_reported_again(caplog: Any) -> None:
+    reporter = FailureReporter({"a.pdf": "OSError: cloud placeholder"})
+
+    with caplog.at_level(logging.WARNING):
+        _fail(reporter, "a.pdf", "file is now corrupt")
+
+    assert len(caplog.records) == 1
 
 
 def test_a_report_is_rendered_as_an_indented_yaml_block() -> None:
