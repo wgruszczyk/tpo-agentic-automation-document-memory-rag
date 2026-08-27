@@ -203,6 +203,31 @@ OCR_TIMEOUT_SECONDS=30
 skipped rather than failing. The image ships `eng` and `pol`; add more `tesseract-ocr-*` packages in
 the `Dockerfile` and list them in `OCR_LANGUAGES`.
 
+## Meeting Recordings
+
+Video and audio files are transcribed locally with Whisper and indexed as timestamped lines, so a
+decision that was only ever spoken can still be found. Nothing is uploaded.
+
+```dotenv
+ENABLE_TRANSCRIPTION=true
+TRANSCRIPTION_MODEL=small
+TRANSCRIPTION_LANGUAGES=en
+TRANSCRIPTION_WINDOW_SECONDS=600
+TRANSCRIPTION_PER_SCAN_LIMIT=1
+TRANSCRIPTION_THREADS=8
+```
+
+Transcription is far slower than reading a document — roughly a tenth of the recording's own length
+on CPU — so it is deliberately paced. `TRANSCRIPTION_PER_SCAN_LIMIT` caps how many new recordings one
+scan will take on, leaving the rest for later passes so ordinary documents keep flowing.
+`TRANSCRIPTION_WINDOW_SECONDS` sets how much audio is decoded at once and therefore the memory
+ceiling; a whole meeting decoded in one piece can be large enough to get the process killed.
+
+`TRANSCRIPTION_LANGUAGES` lists the languages this index is meant to hold. A recording in any other
+language is refused and reported as skipped, because the model stays fluent and confident when it is
+wrong, and invented text is worse in an index than a known gap. A file with no audio track, such as a
+silent screen capture, is skipped for the same reason.
+
 ## When Files Do Not Appear
 
 Two lists explain almost everything:
