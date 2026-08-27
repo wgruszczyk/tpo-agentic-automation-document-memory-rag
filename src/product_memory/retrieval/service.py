@@ -20,6 +20,8 @@ from product_memory.models import (
     ChunkResult,
     DocumentResult,
     FetchResponse,
+    ImageRef,
+    ImageSearchResponse,
     RetrievalResponse,
     SearchItem,
     SearchResponse,
@@ -27,6 +29,9 @@ from product_memory.models import (
 from product_memory.retrieval.compressor import ContextCompressor
 from product_memory.retrieval.reranker import Reranker
 from product_memory.settings import Settings
+
+# Written by the extractor ahead of the text it read out of a picture.
+_IMAGE_MARKER = re.compile(r"\[Image text: ([^\]\n]+)\]")
 
 # Words that say how a question is phrased rather than what it is about. A question carries a
 # handful of names and nouns worth matching on; everything else is grammar, and counting it
@@ -175,13 +180,111 @@ class Retriever:
             )
         RESULT_COUNT.labels(kind="chunks").observe(len(chunks))
         RESULT_COUNT.labels(kind="documents").observe(len(documents))
+        with stage("images"):
+            images = self._attach_images(chunks)
         return RetrievalResponse(
             query=query,
             chunks=chunks,
             documents=documents,
             context_pack=context_pack,
             index_profile=profile,
+            images=images,
         )
+
+    def find_images(
+        self,
+        query: str,
+        limit: int = 10,
+        project: str | None = None,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
+    ) -> ImageSearchResponse:
+        """Return the pictures behind the best matching text, ranked by that text's score.
+
+        An image is found through the words OCR read out of it, so this is the ordinary chunk
+        search with everything that carries no picture dropped.
+        """
+        query = query.strip()
+        if not query:
+            raise ValueError("query cannot be empty")
+        profile = self._ready_profile()
+        candidates = self._search_chunks(
+            query=query,
+            profile_hash=profile["fingerprint"],
+            limit=max(limit, self.settings.candidate_pool_chunks),
+            project=project,
+            since=parse_boundary(since, "since"),
+            until=parse_boundary(until, "until"),
+            per_signal=self.settings.candidate_pool_per_signal,
+        )
+        if self.reranker is not None:
+            candidates = self.reranker.rerank(query, candidates, limit=len(candidates))
+        return ImageSearchResponse(query=query, images=self._attach_images(candidates)[:limit])
+
+    def _attach_images(self, chunks: list[ChunkResult]) -> list[ImageRef]:
+        """Hang each chunk's pictures off it, and return them in the order the chunks ranked."""
+        wanted = {
+            (chunk.source_path, label)
+            for chunk in chunks
+            for label in _IMAGE_MARKER.findall(chunk.content)
+        }
+        if not wanted:
+            return []
+        found = self._load_images(sorted(wanted))
+        ordered: OrderedDict[str, ImageRef] = OrderedDict()
+        for chunk in chunks:
+            # A slide's pictures all share its label, and the chunk repeats that label once per
+            # picture, so the same image is reachable several times over.
+            seen: set[str] = set()
+            for label in _IMAGE_MARKER.findall(chunk.content):
+                for image in found.get((chunk.source_path, label), []):
+                    if image.id in seen:
+                        continue
+                    seen.add(image.id)
+                    reference = image.model_copy(update={"score": chunk.score})
+                    chunk.images.append(reference)
+                    ordered.setdefault(image.id, reference)
+        return list(ordered.values())
+
+    def _load_images(self, keys: list[tuple[str, str]]) -> dict[tuple[str, str], list[ImageRef]]:
+        placeholders = ",".join(["(%s, %s)"] * len(keys))
+        parameters = [value for key in keys for value in key]
+        with self.db.connection(register_vector_type=False) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, source_path, label, media_type, width, height, byte_size, text
+                FROM images
+                WHERE (source_path, label) IN ({placeholders})
+                ORDER BY source_path, ordinal
+                """,
+                parameters,
+            ).fetchall()
+        grouped: dict[tuple[str, str], list[ImageRef]] = {}
+        for row in rows:
+            reference = ImageRef(
+                id=str(row["id"]),
+                source_path=row["source_path"],
+                label=row["label"],
+                media_type=row["media_type"],
+                width=row["width"],
+                height=row["height"],
+                byte_size=row["byte_size"],
+                url=f"{self.settings.public_base_url.rstrip('/')}/images/{row['id']}",
+                text=row["text"],
+            )
+            grouped.setdefault((row["source_path"], row["label"]), []).append(reference)
+        return grouped
+
+    def load_image_bytes(self, image_id: str) -> tuple[bytes, str, str] | None:
+        """Return an image's bytes, media type and label, or None when the id is unknown."""
+        with self.db.connection(register_vector_type=False) as conn:
+            row = conn.execute(
+                "SELECT data, media_type, label FROM images WHERE id = %s",
+                (image_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return bytes(row["data"]), row["media_type"], row["label"]
 
     def search(
         self,

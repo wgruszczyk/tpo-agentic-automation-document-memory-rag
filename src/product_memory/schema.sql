@@ -38,6 +38,28 @@ CREATE TABLE IF NOT EXISTS extraction_cache (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The pictures themselves, kept beside the text OCR read out of them so that an answer can hand
+-- back the screenshot a reader would have pointed at. Keyed by file rather than by document: this
+-- is extractor output, and it survives re-embedding for the same reason the cache above does.
+CREATE TABLE IF NOT EXISTS images (
+    id UUID PRIMARY KEY,
+    source_path TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    label TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    media_type TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    byte_size INTEGER NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    data BYTEA NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_path, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS images_source_path_idx ON images (source_path);
+CREATE INDEX IF NOT EXISTS images_label_idx ON images (source_path, label);
+
 CREATE TABLE IF NOT EXISTS chunks (
     id UUID PRIMARY KEY,
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

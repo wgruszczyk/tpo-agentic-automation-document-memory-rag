@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     ocr_min_words: int = Field(default=6, ge=1)
     ocr_min_word_confidence: int = Field(default=60, ge=0, le=100)
     ocr_timeout_seconds: float = Field(default=30.0, gt=0)
+    # Keep the picture, not just the words in it, so an answer can hand back the screenshot.
+    store_images: bool = True
+    max_stored_image_bytes: int = Field(default=5_000_000, ge=1000)
+    # Where a caller can reach this server, so returned images carry a link that works.
+    public_base_url: str = "http://localhost:2600"
 
     # Recordings usually carry speech that exists nowhere else, so they are transcribed rather
     # than skipped. Whisper is confident even when wrong, so a recording in a language this index

@@ -203,6 +203,33 @@ OCR_TIMEOUT_SECONDS=30
 skipped rather than failing. The image ships `eng` and `pol`; add more `tesseract-ocr-*` packages in
 the `Dockerfile` and list them in `OCR_LANGUAGES`.
 
+### Getting the picture back
+
+The picture is kept beside the text read out of it, so an answer can hand back the screenshot itself
+rather than describing it. Use `find_images` to look one up and `fetch_image` to get the bytes, ready
+to attach to a ticket:
+
+```jsonc
+// find_images("the timeout dialog we saw in staging")
+{"images": [{
+  "id": "a9335301-...",
+  "label": "slide 12",
+  "source_path": "example/release notes.pptx",
+  "media_type": "image/png",
+  "width": 1426, "height": 994,
+  "url": "http://localhost:2600/images/a9335301-...",
+  "text": "Connection timed out. Retry in 30 seconds."
+}]}
+```
+
+`retrieve_knowledge` carries the same references on every chunk they belong to, so a screenshot
+arrives with the passage that explains it. Only pictures OCR could read anything from are kept: one
+nothing can be searched by is one nothing would ever ask for. Set `PUBLIC_BASE_URL` if callers reach
+this server on something other than localhost, and `STORE_IMAGES=false` to keep text only.
+
+Images are collected while a file is read, so documents already indexed gain them the next time they
+are extracted. `make rebuild` re-reads everything.
+
 ## Meeting Recordings
 
 Video and audio files are transcribed locally with Whisper and indexed as timestamped lines, so a

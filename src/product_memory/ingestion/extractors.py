@@ -7,7 +7,7 @@ import re
 import subprocess
 import zipfile
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from email import policy as email_policy
 from email.message import EmailMessage
@@ -37,15 +37,36 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 LOGGER = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif"}
+_MEDIA_TYPES = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "GIF": "image/gif",
+    "BMP": "image/bmp",
+    "WEBP": "image/webp",
+    "TIFF": "image/tiff",
+}
 SPREADSHEET_ROW_LIMIT = 5000
 MAX_EMBEDDED_IMAGE_BYTES = 50 * 1024 * 1024
 TABLE_MAX_LABELLED_COLUMNS = 15
 
 
 @dataclass(slots=True)
+class ExtractedImage:
+    """A picture worth handing back, with the text that makes it findable."""
+
+    label: str
+    media_type: str
+    width: int
+    height: int
+    data: bytes
+    text: str
+
+
+@dataclass(slots=True)
 class ExtractedDocument:
     content: str
     metadata: dict[str, Any]
+    images: list[ExtractedImage] = field(default_factory=list)
 
 
 class UnreadableDocumentError(ValueError):
@@ -101,7 +122,11 @@ def extract_document(
     suffix = path.suffix.lower()
     if suffix in _OOXML_EXTENSIONS and (problem := _ooxml_problem(path)) is not None:
         raise UnreadableDocumentError(f"{path}: {problem}")
-    collector = _OcrCollector(ocr)
+    collector = _OcrCollector(
+        ocr,
+        keep_images=bool(ocr and ocr.settings.store_images),
+        max_bytes=ocr.settings.max_stored_image_bytes if ocr else 0,
+    )
     if suffix in RECORDING_EXTENSIONS:
         extracted = _extract_recording(path, transcriber)
     elif suffix == ".pdf":
@@ -120,17 +145,21 @@ def extract_document(
         extracted = _extract_image(path, collector)
     else:
         extracted = ExtractedDocument(content=_read_text(path), metadata={})
+    extracted.images = collector.images
     return _sanitize_extracted(extracted)
 
 
 class _OcrCollector:
     """Reads text from embedded images within a single document, under a fixed budget."""
 
-    def __init__(self, ocr: OcrEngine | None):
+    def __init__(self, ocr: OcrEngine | None, keep_images: bool = False, max_bytes: int = 0):
         self._ocr = ocr
         self._budget = ocr.settings.ocr_max_images_per_document if ocr else 0
+        self._keep_images = keep_images
+        self._max_bytes = max_bytes
         self._seen_digests: set[str] = set()
         self.sections: list[str] = []
+        self.images: list[ExtractedImage] = []
         self.images_seen = 0
         self.images_read = 0
         self.duplicates_skipped = 0
@@ -139,7 +168,7 @@ class _OcrCollector:
     def active(self) -> bool:
         return self._ocr is not None and self._ocr.available()
 
-    def add(self, label: str, image: Any) -> None:
+    def add(self, label: str, image: Any, data: bytes | None = None) -> None:
         if self._ocr is None:
             return
         self.images_seen += 1
@@ -150,6 +179,25 @@ class _OcrCollector:
         if text:
             self.images_read += 1
             self.sections.append(f"[Image text: {label}]\n{text}")
+            self._keep(label, image, data, text)
+
+    def _keep(self, label: str, image: Any, data: bytes | None, text: str) -> None:
+        if not self._keep_images:
+            return
+        payload, media_type = _image_payload(image, data)
+        if payload is None or len(payload) > self._max_bytes:
+            return
+        width, height = getattr(image, "size", (0, 0))
+        self.images.append(
+            ExtractedImage(
+                label=label,
+                media_type=media_type,
+                width=int(width),
+                height=int(height),
+                data=payload,
+                text=text,
+            )
+        )
 
     def add_bytes(self, label: str, data: bytes) -> None:
         digest = hashlib.sha256(data).hexdigest()
@@ -163,7 +211,7 @@ class _OcrCollector:
         if image is None:
             return
         with image:
-            self.add(label, image)
+            self.add(label, image, data)
 
     def compose(self, text: str) -> str:
         return "\n\n".join(part for part in [text, *self.sections] if part)
@@ -177,6 +225,20 @@ class _OcrCollector:
             metadata["ocr_image_count"] = self.images_read
         if self.duplicates_skipped:
             metadata["repeated_image_count"] = self.duplicates_skipped
+
+
+def _image_payload(image: Any, data: bytes | None) -> tuple[bytes | None, str]:
+    """Return bytes a browser can display, preferring the original over a re-encode."""
+    if data:
+        media_type = _MEDIA_TYPES.get((getattr(image, "format", "") or "").upper())
+        if media_type:
+            return data, media_type
+    try:
+        buffer = io.BytesIO()
+        image.convert("RGB").save(buffer, format="PNG")
+    except Exception:
+        return None, ""
+    return buffer.getvalue(), "image/png"
 
 
 def _open_image_bytes(data: bytes, label: str) -> Any:
@@ -196,6 +258,7 @@ def _sanitize_extracted(extracted: ExtractedDocument) -> ExtractedDocument:
     return ExtractedDocument(
         content=strip_null_bytes(extracted.content),
         metadata=strip_null_bytes(extracted.metadata),
+        images=extracted.images,
     )
 
 
@@ -226,7 +289,7 @@ def _extract_pdf(path: Path, collector: _OcrCollector) -> ExtractedDocument:
             try:
                 for image in page.images:
                     if image.image is not None:
-                        collector.add(f"page {number}", image.image)
+                        collector.add(f"page {number}", image.image, getattr(image, "data", None))
             except Exception:
                 LOGGER.debug("Could not read images on page %s of %s", number, path, exc_info=True)
         if not text and collector.images_read:
@@ -263,7 +326,7 @@ def _extract_image(path: Path, collector: _OcrCollector) -> ExtractedDocument:
         metadata["image_width"], metadata["image_height"] = image.size
         text = ""
         if collector.active:
-            collector.add(path.name, image)
+            collector.add(path.name, image, path.read_bytes())
             text = "\n\n".join(collector.sections)
             metadata["ocr_applied"] = bool(collector.images_read)
 

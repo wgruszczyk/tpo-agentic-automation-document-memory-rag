@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import functools
 import logging
+import re
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
@@ -10,6 +12,7 @@ from typing import Any, TypeVar
 
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ImageContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -22,6 +25,14 @@ LOGGER = logging.getLogger(__name__)
 runtime = Runtime()
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+_UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _download_name(label: str, media_type: str) -> str:
+    stem = _UNSAFE_FILENAME.sub("-", label).strip("-.") or "image"
+    suffix = media_type.rpartition("/")[2] or "png"
+    return stem if stem.lower().endswith(f".{suffix}") else f"{stem}.{suffix}"
 
 
 def measured(tool: str) -> Callable[[F], F]:
@@ -172,6 +183,58 @@ def list_documents(
 def knowledge_status() -> dict:
     """Show whether the private document index is ready, plus embedding profile and document counts."""
     return runtime.retriever.status()
+
+
+@mcp.tool()
+@measured("find_images")
+def find_images(
+    query: str,
+    limit: int = 10,
+    project: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict:
+    """Find screenshots, diagrams and scans whose contents match the query.
+
+    Returns references, not pixels: each has an id, the text read out of the picture, and a url
+    that serves the original bytes. Use it when the answer is something to show or to attach to a
+    ticket rather than something to quote. Call fetch_image with an id to get the picture itself.
+    """
+    response = runtime.retriever.find_images(
+        query=query, limit=limit, project=project, since=since, until=until
+    )
+    return response.model_dump(mode="json")
+
+
+@mcp.tool()
+@measured("fetch_image")
+def fetch_image(image_id: str) -> ImageContent:
+    """Return one stored picture by id, ready to attach to a ticket or message."""
+    found = runtime.retriever.load_image_bytes(image_id)
+    if found is None:
+        raise ValueError(f"No image with id {image_id}")
+    data, media_type, _label = found
+    return ImageContent(
+        type="image", data=base64.b64encode(data).decode("ascii"), mimeType=media_type
+    )
+
+
+@mcp.custom_route("/images/{image_id}", methods=["GET"])
+async def serve_image(request: Request) -> Response:
+    found = await asyncio.to_thread(
+        runtime.retriever.load_image_bytes, request.path_params["image_id"]
+    )
+    if found is None:
+        return JSONResponse({"detail": "unknown image"}, status_code=404)
+    data, media_type, label = found
+    return Response(
+        data,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{_download_name(label, media_type)}"',
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
 
 
 @mcp.custom_route("/health", methods=["GET"])

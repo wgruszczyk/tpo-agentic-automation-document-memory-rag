@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
+from typing import Any
 
 from product_memory.db import Database
 from product_memory.ingestion.extractors import ExtractedDocument
@@ -47,4 +49,33 @@ class ExtractionCache:
                     json.dumps(extracted.metadata, ensure_ascii=False, default=str),
                 ),
             )
+            self._store_images(conn, source_path, signature, extracted)
             conn.commit()
+
+    @staticmethod
+    def _store_images(conn: Any, source_path: str, signature: str, doc: ExtractedDocument) -> None:
+        # Images belong to the extraction, not to the document row, so they are replaced whenever
+        # the file is read again and left alone when a cached read is reused.
+        conn.execute("DELETE FROM images WHERE source_path = %s", (source_path,))
+        for ordinal, image in enumerate(doc.images):
+            conn.execute(
+                """
+                INSERT INTO images (
+                    id, source_path, signature, label, ordinal,
+                    media_type, width, height, byte_size, text, data
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    uuid.uuid4(),
+                    source_path,
+                    signature,
+                    image.label,
+                    ordinal,
+                    image.media_type,
+                    image.width,
+                    image.height,
+                    len(image.data),
+                    image.text,
+                    image.data,
+                ),
+            )

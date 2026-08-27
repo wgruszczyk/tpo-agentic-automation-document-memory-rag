@@ -6,6 +6,21 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class ImageRef(BaseModel):
+    """A picture that can be downloaded and attached, not the picture itself."""
+
+    id: str
+    source_path: str
+    label: str
+    media_type: str
+    width: int
+    height: int
+    byte_size: int
+    url: str
+    text: str = ""
+    score: float = 0.0
+
+
 class ChunkResult(BaseModel):
     id: str
     document_id: str
@@ -22,6 +37,7 @@ class ChunkResult(BaseModel):
     recency_score: float
     score: float
     rerank_score: float | None = None
+    images: list[ImageRef] = Field(default_factory=list)
 
 
 class DocumentResult(BaseModel):
@@ -43,6 +59,12 @@ class RetrievalResponse(BaseModel):
     documents: list[DocumentResult]
     context_pack: str
     index_profile: dict[str, Any]
+    images: list[ImageRef] = Field(default_factory=list)
+
+
+class ImageSearchResponse(BaseModel):
+    query: str
+    images: list[ImageRef]
 
 
 class SearchItem(BaseModel):

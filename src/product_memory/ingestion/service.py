@@ -527,6 +527,7 @@ class IngestionService:
             missing = [row for row in active if row["source_path"] not in found_paths]
             for row in missing:
                 conn.execute("DELETE FROM chunks WHERE document_id = %s", (row["id"],))
+                conn.execute("DELETE FROM images WHERE source_path = %s", (row["source_path"],))
                 conn.execute(
                     """
                     UPDATE documents
