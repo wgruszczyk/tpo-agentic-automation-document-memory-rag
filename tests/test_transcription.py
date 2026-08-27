@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from product_memory.ingestion.extractors import RECORDING_EXTENSIONS, _extract_recording
+from product_memory.ingestion.extractors import (
+    RECORDING_EXTENSIONS,
+    ExtractedDocument,
+    _extract_recording,
+)
 from product_memory.ingestion.parser import EmptyDocumentError
 from product_memory.ingestion.transcription import (
     Transcriber,
@@ -128,6 +132,81 @@ def test_a_file_with_no_audio_track_is_reported_as_unreadable() -> None:
         _extract_recording(
             Path("broken.mp4"), RefusingTranscriber(subprocess.SubprocessError("bad input"))
         )
+
+
+class RecordingCache:
+    def __init__(self) -> None:
+        self.stored: dict[str, ExtractedDocument] = {}
+        self.reads: list[str] = []
+
+    def get(self, source_path: str, signature: str) -> ExtractedDocument | None:
+        return self.stored.get(f"{source_path}|{signature}")
+
+    def set(self, source_path: str, signature: str, extracted: ExtractedDocument) -> None:
+        self.stored[f"{source_path}|{signature}"] = extracted
+
+
+def _parser(tmp_path, cache: RecordingCache, **overrides):
+    from product_memory.ingestion.parser import DocumentParser
+
+    return DocumentParser(_settings(knowledge_dir=tmp_path, **overrides), cache=cache)
+
+
+def test_a_rebuild_does_not_listen_to_a_recording_it_has_already_heard(tmp_path, monkeypatch):
+    # Re-reading a document costs a moment; re-hearing a meeting costs the meeting again.
+    recording = tmp_path / "meeting.mp4"
+    recording.write_bytes(b"video")
+    cache = RecordingCache()
+    parser = _parser(tmp_path, cache)
+    calls: list[Path] = []
+
+    def _extract(path, _ocr=None, _transcriber=None):
+        calls.append(path)
+        return ExtractedDocument(content="spoken words", metadata={})
+
+    monkeypatch.setattr("product_memory.ingestion.parser.extract_document", _extract)
+
+    parser._extract(recording)  # noqa: SLF001
+    parser._extract(recording, force=True)  # noqa: SLF001
+
+    assert len(calls) == 1
+
+
+def test_a_rebuild_does_re_read_a_document(tmp_path, monkeypatch):
+    document = tmp_path / "notes.md"
+    document.write_text("hello")
+    cache = RecordingCache()
+    parser = _parser(tmp_path, cache)
+    calls: list[Path] = []
+
+    def _extract(path, _ocr=None, _transcriber=None):
+        calls.append(path)
+        return ExtractedDocument(content="hello", metadata={})
+
+    monkeypatch.setattr("product_memory.ingestion.parser.extract_document", _extract)
+
+    parser._extract(document)  # noqa: SLF001
+    parser._extract(document, force=True)  # noqa: SLF001
+
+    assert len(calls) == 2
+
+
+def test_changing_the_model_makes_a_recording_worth_hearing_again(tmp_path, monkeypatch):
+    recording = tmp_path / "meeting.mp4"
+    recording.write_bytes(b"video")
+    cache = RecordingCache()
+    calls: list[Path] = []
+
+    def _extract(path, _ocr=None, _transcriber=None):
+        calls.append(path)
+        return ExtractedDocument(content="spoken words", metadata={})
+
+    monkeypatch.setattr("product_memory.ingestion.parser.extract_document", _extract)
+
+    _parser(tmp_path, cache, transcription_model="small")._extract(recording)  # noqa: SLF001
+    _parser(tmp_path, cache, transcription_model="medium")._extract(recording)  # noqa: SLF001
+
+    assert len(calls) == 2
 
 
 def test_transcription_is_skipped_when_the_engine_is_unavailable() -> None:

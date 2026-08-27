@@ -264,13 +264,19 @@ def evaluate(
             raise typer.BadParameter(
                 "--track needs MLFLOW_TRACKING_URI. Start MLflow with 'make observability'."
             )
+        status = runtime.retriever.status()
         run_id = log_evaluation(
             report,
             settings=runtime.settings,
-            index_profile=runtime.retriever.status().get("profile", {}),
+            index_profile=status.get("profile", {}),
             experiment=experiment,
             run_name=run_name or None,
             questions=path.name,
+            corpus={
+                "documents": status.get("documents"),
+                "chunks": status.get("chunks"),
+                "images": status.get("images"),
+            },
         )
         report["mlflow_run_id"] = run_id
 

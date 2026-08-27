@@ -13,6 +13,7 @@ from dateutil import parser as date_parser
 
 from product_memory.ingestion.cache import ExtractionCache, file_signature
 from product_memory.ingestion.extractors import (
+    RECORDING_EXTENSIONS,
     EmptyDocumentError,
     ExtractedDocument,
     extract_document,
@@ -89,14 +90,23 @@ class DocumentParser:
         """Whether this file's text is already extracted, so re-reading it would cost nothing."""
         if self.cache is None:
             return False
-        return self.cache.get(relative_path, file_signature(path)) is not None
+        return self.cache.get(relative_path, self._signature(path)) is not None
+
+    def _signature(self, path: Path) -> str:
+        signature = file_signature(path)
+        if path.suffix.lower() in RECORDING_EXTENSIONS:
+            # A transcript depends on the model as much as on the file, and nothing else does.
+            return f"{signature}:{self.settings.transcription_model}"
+        return signature
 
     def _extract(self, path: Path, force: bool = False) -> ExtractedDocument:
         if self.cache is None:
             return extract_document(path, self.ocr, self.transcriber)
-        signature = file_signature(path)
+        signature = self._signature(path)
         relative_path = path.absolute().relative_to(self.settings.knowledge_dir.absolute()).as_posix()
-        if not force:
+        # A rebuild re-reads files to pick up extraction changes, but re-hearing a recording costs
+        # the length of the meeting again for a transcript the signature says cannot have changed.
+        if not force or path.suffix.lower() in RECORDING_EXTENSIONS:
             cached = self.cache.get(relative_path, signature)
             if cached is not None:
                 return cached

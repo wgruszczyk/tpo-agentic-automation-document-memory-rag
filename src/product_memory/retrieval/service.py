@@ -426,6 +426,7 @@ class Retriever:
                 SELECT
                   (SELECT count(*) FROM documents WHERE is_active = TRUE) AS documents,
                   (SELECT count(*) FROM chunks) AS chunks,
+                  (SELECT count(*) FROM images) AS images,
                   (SELECT max(updated_at) FROM documents WHERE is_active = TRUE) AS latest_document_update
                 """
             ).fetchone()
@@ -434,6 +435,7 @@ class Retriever:
             "profile": profile,
             "documents": counts["documents"],
             "chunks": counts["chunks"],
+            "images": counts["images"],
             "skipped_documents": skipped.get("count", 0),
             "failed_documents": failed.get("count", 0),
             "latest_document_update": counts["latest_document_update"].isoformat()

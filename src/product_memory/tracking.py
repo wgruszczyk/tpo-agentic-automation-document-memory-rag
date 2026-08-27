@@ -62,6 +62,7 @@ def log_evaluation(
     experiment: str,
     run_name: str | None = None,
     questions: str | None = None,
+    corpus: dict[str, Any] | None = None,
 ) -> str | None:
     """Record one evaluation as an MLflow run. Returns the run id, or None when tracking is off.
 
@@ -81,7 +82,11 @@ def log_evaluation(
         mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
         mlflow.set_experiment(experiment)
         with mlflow.start_run(run_name=run_name) as run:
-            mlflow.log_params(run_parameters(settings, index_profile))
+            parameters = run_parameters(settings, index_profile)
+            # The same questions against a larger index are harder questions, so a score means
+            # nothing without the size of the haystack it was scored against.
+            parameters.update({f"corpus_{name}": value for name, value in (corpus or {}).items()})
+            mlflow.log_params(parameters)
             mlflow.log_metrics(run_metrics(report))
             mlflow.set_tags(
                 {
