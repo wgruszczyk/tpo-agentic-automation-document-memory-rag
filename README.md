@@ -1,8 +1,8 @@
 # Product Memory RAG
 
-Local private document memory for AI agents. Put transcripts, notes, product documents and
-requirements in `knowledge/`; the service scans them, extracts text and reliable metadata, stores
-documents and embeddings in PostgreSQL + pgvector, and exposes retrieval through MCP at
+Local private document memory for AI agents. Put transcripts, notes, product documents, screenshots
+and meeting recordings in `knowledge/`; the service scans them, extracts text and reliable metadata,
+stores documents and embeddings in PostgreSQL + pgvector, and exposes retrieval through MCP at
 `http://localhost:2600/mcp`.
 
 Built for a laptop, fewer than about 500 documents, English or Polish content, GitHub Copilot and
@@ -26,6 +26,8 @@ into repositories where Codex works, as `AGENTS.md`.
 | `search` | Document-level results in the common MCP search shape. |
 | `fetch` | A full document or chunk by id. |
 | `list_documents` | Active documents, newest first. |
+| `find_images` | Screenshots, diagrams and scans matching a query, as references with a url. |
+| `fetch_image` | One stored picture by id, ready to attach to a ticket. |
 | `knowledge_status` | Index status, embedding profile and counters. |
 
 `retrieve_knowledge`, `search` and `list_documents` accept optional `since` and `until` ISO dates.
@@ -35,19 +37,20 @@ into repositories where Codex works, as `AGENTS.md`.
 Two loops, sharing one database.
 
 **Ingestion** runs every 30 seconds and owns everything up to the stored vector. It walks
-`knowledge/`, extracts text from each file — including OCR for pictures and for images embedded in
-PDFs and Office documents — and reads whatever metadata the file can be trusted to state, chiefly a
-date. Files are deduplicated on a checksum of their *parsed* text, so the same document arriving by
-two paths is indexed once. What survives is split into overlapping chunks, each chunk is embedded,
-and the vectors land in Postgres. An extraction cache keyed on size and modification time means an
-unchanged file is never OCR'd twice.
+`knowledge/`, extracts text from each file — OCR for pictures and for images embedded in PDFs and
+Office documents, Whisper for meeting recordings — and reads whatever metadata the file can be
+trusted to state, chiefly a date. Pictures are kept alongside the text read out of them, so an answer
+can hand back the screenshot itself. Files are deduplicated on a checksum of their *parsed* text, so
+the same document arriving by two paths is indexed once. What survives is split into overlapping
+chunks, each chunk is embedded, and the vectors land in Postgres. An extraction cache keyed on size
+and modification time means an unchanged file is never OCR'd, or listened to, twice.
 
 Anything that changes what an embedding *means* — the model, its revision, the dimension, the chunk
 size — is hashed into an **index fingerprint**. On startup the service compares the fingerprint it
 would produce now against the one stored with the index, and rebuilds everything if they differ.
 That single mechanism is what makes changing a model safe, and also what makes it expensive.
 
-**Retrieval** answers a question in five stages, each timed and visible in Grafana:
+**Retrieval** answers a question in six stages, each timed and visible in Grafana:
 
 | Stage | What it does |
 |---|---|
@@ -55,6 +58,7 @@ That single mechanism is what makes changing a model safe, and also what makes i
 | `search_sql` | One statement scores chunks on three signals and returns a candidate pool. |
 | `rerank` | A cross-encoder rereads the shortlist with the question attached, and reorders it. |
 | `documents` | Expands the surviving chunks into whole documents. |
+| `images` | Attaches the pictures the matched text was read out of. |
 | `compress` | Packs the result into a character-budgeted block that preserves source ids. |
 
 The three signals are **meaning** (cosine distance to the query vector), **wording** (full-text and
@@ -80,20 +84,62 @@ leaves the reasoning to whichever agent asked.
 
 ## Architecture
 
+**Ingestion** — everything up to the stored vector:
+
 ```mermaid
-flowchart TD
-    A["knowledge/ files<br/>txt, md, rst, log, vtt, srt, pdf, docx, pptx, xlsx, msg, images"] --> B["Scanner<br/>every 30 seconds"]
-    B --> C["Parser<br/>text extraction + reliable metadata"]
-    C --> D["Checksum dedupe<br/>one active canonical document"]
-    D --> E["Chunker<br/>LangChain RecursiveTextSplitter"]
-    E --> F{"Embedding provider"}
-    F --> G["Local Hugging Face<br/>default multilingual CPU model"]
-    F --> H["OpenAI-compatible API<br/>optional remote embeddings"]
-    G --> I["PostgreSQL + pgvector<br/>documents, chunks, embeddings"]
-    H --> I
-    I --> J["Hybrid retrieval<br/>cosine + lexical + recency"]
-    J --> K["MCP Streamable HTTP<br/>localhost:2600/mcp"]
-    K --> L["Codex / Copilot"]
+flowchart TB
+    files["knowledge/ files<br/>notes · transcripts · documents<br/>mail · pictures · recordings"]
+
+    files --> scan["Scanner · every 30s<br/>follows symlinks"]
+    scan --> cache{"Already<br/>extracted?"}
+    cache -->|"miss"| parse["Parser<br/>per-format extractor<br/>+ metadata it can trust"]
+    parse --> ocr["OCR · Tesseract<br/>standalone and embedded"]
+    parse --> asr["Transcription<br/>faster-whisper + ffmpeg<br/>windowed · accepted languages"]
+    ocr --> pics[("images<br/>bytes + the text<br/>read from them")]
+    cache -->|"hit"| dedupe
+    parse --> dedupe
+    ocr --> dedupe
+    asr --> dedupe["Dedupe<br/>checksum of the parsed text"]
+    dedupe --> chunk["Chunker<br/>overlapping windows"]
+    fp["Index fingerprint<br/>model · revision<br/>dimension · chunk size"] -.->|"mismatch<br/>forces a reindex"| chunk
+    chunk --> emb{"Embedding<br/>provider"}
+    emb -->|"default"| hf["local Hugging Face<br/>multilingual CPU<br/>pinned revision"]
+    emb -->|"optional"| api["OpenAI-compatible<br/>API"]
+    hf --> db
+    api --> db
+    pics --> db[("PostgreSQL + pgvector<br/>documents · chunks · embeddings<br/>images · extraction cache · state")]
+```
+
+| Format | What is indexed |
+|---|---|
+| `txt` `md` `markdown` `rst` `log` | Text, plus YAML front matter as metadata. |
+| `vtt` `srt` | Transcript text, with speakers, language and duration where present. |
+| `pdf` | Page text, and OCR of embedded images. A PDF with no text layer is OCR'd whole. |
+| `docx` `pptx` `xlsx` | Text, tables and speaker notes, and OCR of embedded images. |
+| `msg` `eml` | Subject, participants, date and body, and OCR of image attachments. |
+| `png` `jpg` `jpeg` `tif` `tiff` `bmp` `webp` `gif` | OCR text. The picture is kept and can be returned. |
+| `mp4` `mov` `m4v` `webm` `mkv` `m4a` `mp3` `wav` | Speech, as timestamped lines. Refused if not in an accepted language. |
+
+**Retrieval and serving** — the six timed stages, and everything watching them:
+
+```mermaid
+flowchart TB
+    ask(["a question"]) --> s1["embed_query"]
+    db[("PostgreSQL<br/>+ pgvector")] --> s2
+    s1 --> s2["search_sql<br/>meaning + wording + recency<br/>fused by rank · semantic floor"]
+    s2 --> s3["rerank<br/>cross-encoder on the shortlist"]
+    s3 --> s4["documents<br/>expand to whole files"]
+    s4 --> s5["images<br/>attach the pictures<br/>behind the matched text"]
+    s5 --> s6["compress<br/>context pack keeping source ids"]
+    s6 --> mcp["MCP Streamable HTTP · localhost:2600/mcp<br/>retrieve_knowledge · search · fetch<br/>list_documents · find_images · fetch_image"]
+    mcp --> client["Codex · Copilot<br/>any MCP client"]
+    db --> serve["GET /images/id<br/>original bytes, for attaching"]
+    serve --> client
+    db --> met["/metrics<br/>stage timings · index gauges"]
+    met --> obs["Prometheus · Grafana · Loki"]
+    qs["question set"] --> ev["Evaluation<br/>hit rate · MRR · recall<br/>nDCG · latency"]
+    db --> ev
+    ev --> ml["MLflow<br/>scores beside the settings<br/>and corpus size behind them"]
 ```
 
 At this scale the service uses exact pgvector cosine search, PostgreSQL lexical search
