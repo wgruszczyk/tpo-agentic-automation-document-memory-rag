@@ -25,7 +25,11 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pypdf import PdfReader
 
 from product_memory.ingestion.ocr import OcrEngine
-from product_memory.ingestion.transcription import Transcriber, UnsupportedLanguageError
+from product_memory.ingestion.transcription import (
+    NoAudioError,
+    Transcriber,
+    UnsupportedLanguageError,
+)
 
 # pypdf logs a WARNING for every recovered xref entry in malformed-but-readable PDFs;
 # these are handled automatically and not actionable, so keep them out of app logs.
@@ -64,6 +68,9 @@ def _extract_recording(path: Path, transcriber: Transcriber | None) -> Extracted
     LOGGER.info("Transcribing %s", path)
     try:
         content, metadata = transcriber.transcribe(path)
+    except NoAudioError as error:
+        # A screen capture with no microphone is a legitimate file, not a broken one.
+        raise EmptyDocumentError(str(error)) from error
     except UnsupportedLanguageError as error:
         raise EmptyDocumentError(f"{path}: {error}") from error
     except subprocess.SubprocessError as error:

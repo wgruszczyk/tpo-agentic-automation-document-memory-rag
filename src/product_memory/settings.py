@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     transcription_threads: int = Field(default=8, ge=1)
     # Greedy decoding. Wider beams cost proportionally more for a corpus this size.
     transcription_beam_size: int = Field(default=1, ge=1, le=10)
+    # Audio is decoded a window at a time so peak memory follows the window, not the meeting.
+    transcription_window_seconds: int = Field(default=600, ge=60, le=3600)
     transcription_timeout_seconds: float = Field(default=3600.0, gt=0)
     # One scan should not be spent entirely on recordings. Whatever is left over is picked up by
     # the next pass, so ordinary documents keep being indexed in between.

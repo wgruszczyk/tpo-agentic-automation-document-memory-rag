@@ -33,10 +33,16 @@ class FakeModel:
         return iter(self._segments), info
 
 
-def _transcriber(model: FakeModel, **overrides) -> Transcriber:
+def _transcriber(model: FakeModel, duration: float = 61.0, **overrides) -> Transcriber:
     transcriber = Transcriber(_settings(**overrides))
     transcriber._model = model  # noqa: SLF001
-    transcriber._extract_audio = lambda _path, _destination: None  # type: ignore[method-assign]
+    transcriber._has_audio = lambda _path: True  # type: ignore[method-assign]
+    transcriber._duration_seconds = lambda _path: duration  # type: ignore[method-assign]
+
+    def _write_audio(_path, destination, _start, _length) -> None:
+        destination.write_bytes(b"\0" * 4096)
+
+    transcriber._extract_audio = _write_audio  # type: ignore[method-assign]
     return transcriber
 
 
@@ -127,6 +133,41 @@ def test_a_file_with_no_audio_track_is_reported_as_unreadable() -> None:
 def test_transcription_is_skipped_when_the_engine_is_unavailable() -> None:
     with pytest.raises(EmptyDocumentError, match="Transcription is unavailable"):
         _extract_recording(Path("meeting.mp4"), None)
+
+
+def test_a_long_recording_is_read_in_windows_with_continuous_timestamps() -> None:
+    # Each window is decoded on its own, so the model reports times from the window start and
+    # the transcript is only coherent if the window offset is added back.
+    windows: list[tuple[float, float]] = []
+    model = FakeModel([SimpleNamespace(start=5.0, text="point")])
+    transcriber = _transcriber(model, duration=1500.0, transcription_window_seconds=600)
+
+    def _record(_path, destination, start, length) -> None:
+        windows.append((start, length))
+        destination.write_bytes(b"\0" * 4096)
+
+    transcriber._extract_audio = _record  # type: ignore[method-assign]
+
+    content, metadata = transcriber.transcribe(Path("long.mp4"))
+
+    assert [start for start, _ in windows] == [0.0, 600.0, 1200.0]
+    assert content.splitlines() == [
+        "[00:00:05] point",
+        "[00:10:05] point",
+        "[00:20:05] point",
+    ]
+    assert metadata["duration_seconds"] == 1500.0
+
+
+def test_a_recording_without_an_audio_track_is_skipped_not_failed() -> None:
+    # A screen capture with no microphone is an ordinary file; recording it as a fault would
+    # leave a permanent error that no one can act on.
+    transcriber = Transcriber(_settings())
+    transcriber.available = lambda: True  # type: ignore[method-assign]
+    transcriber._has_audio = lambda _path: False  # type: ignore[method-assign]
+
+    with pytest.raises(EmptyDocumentError, match="no audio track"):
+        _extract_recording(Path("silent.mp4"), transcriber)
 
 
 class CachingParser:
