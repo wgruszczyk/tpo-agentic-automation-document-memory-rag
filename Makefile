@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test clean reset-data
+.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test backup clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -102,6 +102,15 @@ link-knowledge:
 
 test:
 	$(PYTHON) -m pytest
+
+backup:
+	@mkdir -p backups
+	@stamp=$$(date +%Y%m%d-%H%M%S); \
+	dir=backups/product-memory-$$stamp; mkdir -p $$dir; \
+	$(COMPOSE) exec -T db sh -c 'pg_dump -Fc -U "$$POSTGRES_USER" "$$POSTGRES_DB"' > $$dir/database.dump; \
+	cp eval/questions*.yaml $$dir/ 2>/dev/null || true; \
+	tar -czf $$dir.tar.gz -C backups product-memory-$$stamp && rm -rf $$dir; \
+	echo "wrote $$dir.tar.gz"
 
 clean:
 	$(COMPOSE) down --remove-orphans

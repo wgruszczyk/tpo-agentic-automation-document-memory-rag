@@ -584,10 +584,18 @@ With a remote provider, chunk content is sent to the embedding endpoint.
 ## Backup And Reset
 
 ```bash
-docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > product-memory-backup.sql
+make backup             # database and question sets, into backups/
 docker compose down     # stop, keep data
 make reset-data         # delete database and model cache volumes
 ```
+
+The question sets are backed up alongside the database on purpose. They cannot be regenerated — a
+handwritten question encodes a judgement about what a good answer looks like, and that judgement is
+worth more than the index, which can always be rebuilt from `knowledge/`. They stay out of version
+control because they name private documents, which is exactly why they need a backup instead.
+
+The dump is written in PostgreSQL's compressed custom format, because stored images make a plain
+SQL dump large. Restore with `pg_restore`.
 
 Files in `knowledge/` stay on disk and are indexed again on the next start.
 

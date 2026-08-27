@@ -48,6 +48,9 @@ product-memory-backup.sql
 /eval/questions*.yaml
 !/eval/questions.example.yaml
 
+# Backups hold the same private content
+/backups/
+
 # Editor and OS files
 .DS_Store
 Thumbs.db
