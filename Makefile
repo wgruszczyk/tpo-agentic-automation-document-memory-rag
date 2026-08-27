@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test backup clean reset-data
+.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test backup check-private clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -102,6 +102,17 @@ link-knowledge:
 
 test:
 	$(PYTHON) -m pytest
+
+check-private:
+	@test -f .private-terms || { echo "no .private-terms yet — copy .private-terms.example and fill it in"; exit 0; }
+	@found=$$(git grep -inIE -f .private-terms -- . || true); \
+	if [ -n "$$found" ]; then \
+		echo "$$found"; \
+		echo ""; \
+		echo "private terms found in tracked files — do not commit"; \
+		exit 1; \
+	fi; \
+	echo "tracked files carry none of the private terms"
 
 backup:
 	@mkdir -p backups

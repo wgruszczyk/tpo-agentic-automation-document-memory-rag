@@ -1,0 +1,15 @@
+# Copy to .private-terms, which is never committed, and list one extended regular
+# expression per line. `make check-private` fails when any of them appears in a
+# tracked file.
+#
+# This repository is public while the documents it indexes are not. The risk is
+# not that someone commits the corpus on purpose; it is that a real snippet gets
+# pasted into a README, a test fixture or an example while illustrating a feature.
+#
+# List employer, customer, project, product and vendor names, internal
+# abbreviations, and anything else a reader outside the company should not learn.
+
+# ACME
+# ACME Group
+# project-phoenix
+# some-internal-vendor

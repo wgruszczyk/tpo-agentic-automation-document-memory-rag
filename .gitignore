@@ -51,6 +51,9 @@ product-memory-backup.sql
 # Backups hold the same private content
 /backups/
 
+# The words that must never reach a commit. The list itself would be the leak.
+/.private-terms
+
 # Editor and OS files
 .DS_Store
 Thumbs.db
