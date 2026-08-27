@@ -90,8 +90,13 @@ class Runtime:
             access_logger.addFilter(_SuppressProbes())
         self.db.wait_until_ready()
         self.db.initialize_schema()
+        self.ensure_index_profile_only()
+
+    def ensure_index_profile_only(self) -> None:
+        # The first scan is left to the watcher. Transcribing a recording takes as long as the
+        # meeting did, and a service that will not answer until the whole folder is read is worse
+        # than one that answers from what it has while the rest arrives.
         self.ingestion.ensure_index_profile()
-        self.ingestion.scan_once()
 
     def refresh_index_gauges(self) -> None:
         totals = self.ingestion.index_totals()

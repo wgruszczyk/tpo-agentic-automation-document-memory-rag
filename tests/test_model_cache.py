@@ -30,6 +30,14 @@ def test_an_interrupted_download_does_not_count_as_cached(tmp_path: Path) -> Non
     assert is_model_cached(tmp_path, MODEL) is False
 
 
+def test_ctranslate2_weights_count_as_cached(tmp_path: Path) -> None:
+    # faster-whisper ships a single model.bin rather than safetensors, and not recognising it
+    # makes a downloaded model look permanently absent.
+    _cache_snapshot(tmp_path, "model.bin")
+
+    assert is_model_cached(tmp_path, MODEL) is True
+
+
 def test_a_cached_model_loads_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
     monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)

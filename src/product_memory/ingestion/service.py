@@ -14,7 +14,7 @@ import numpy as np
 from product_memory.db import Database
 from product_memory.embeddings.base import EmbeddingProvider, passage_text
 from product_memory.ingestion.chunker import DocumentChunker
-from product_memory.ingestion.extractors import UnreadableDocumentError
+from product_memory.ingestion.extractors import RECORDING_EXTENSIONS, UnreadableDocumentError
 from product_memory.ingestion.parser import DocumentParser, EmptyDocumentError, ParsedDocument
 from product_memory.metrics import INGESTION_DOCUMENTS, INGESTION_SECONDS, observe
 from product_memory.settings import Settings
@@ -187,7 +187,7 @@ class IngestionService:
         root.mkdir(parents=True, exist_ok=True)
         paths = self._discover_paths(root)
         parsed_documents: list[ParsedDocument] = []
-        added = updated = unchanged = 0
+        added = updated = unchanged = deferred = 0
         skipped_documents: dict[str, str] = {}
         failed_documents: dict[str, str] = {}
         known_failures = {
@@ -195,9 +195,15 @@ class IngestionService:
             for entry in self.failed_documents().get("documents", [])
         }
         failures = FailureReporter(known_failures)
+        recordings_left = self.settings.transcription_per_scan_limit
 
         for path in paths:
             relative_path = self._relative_source_path(root, path)
+            if self._is_unread_recording(path, relative_path):
+                if recordings_left <= 0:
+                    deferred += 1
+                    continue
+                recordings_left -= 1
             try:
                 parsed_documents.append(self.parser.parse(path, force=force))
             except (EmptyDocumentError, UnreadableDocumentError) as error:
@@ -234,6 +240,7 @@ class IngestionService:
             "removed": removed,
             "failed": failed,
             "skipped": len(skipped_documents),
+            "deferred": deferred,
             "duplicates": duplicates,
         }
         for outcome, count in counters.items():
@@ -268,6 +275,12 @@ class IngestionService:
 
     def index_totals(self) -> dict[str, Any]:
         return self._index_totals()
+
+    def _is_unread_recording(self, path: Path, relative_path: str) -> bool:
+        """A recording whose transcript is not already cached, so reading it costs real time."""
+        if path.suffix.lower() not in RECORDING_EXTENSIONS:
+            return False
+        return not self.parser.has_cached_extraction(path, relative_path)
 
     def _record_document_reasons(
         self, key: str, reasons: dict[str, str]

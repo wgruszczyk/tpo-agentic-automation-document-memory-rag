@@ -4,6 +4,7 @@ import hashlib
 import io
 import logging
 import re
+import subprocess
 import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pypdf import PdfReader
 
 from product_memory.ingestion.ocr import OcrEngine
+from product_memory.ingestion.transcription import Transcriber, UnsupportedLanguageError
 
 # pypdf logs a WARNING for every recovered xref entry in malformed-but-readable PDFs;
 # these are handled automatically and not actionable, so keep them out of app logs.
@@ -46,8 +48,29 @@ class UnreadableDocumentError(ValueError):
     """The file cannot be read at all, for a reason no retry or code change would fix."""
 
 
+class EmptyDocumentError(ValueError):
+    """Raised when a file carries no text worth indexing, such as a picture of a logo."""
+
+
 _OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 _OOXML_EXTENSIONS = {".docx", ".pptx", ".xlsx"}
+RECORDING_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".m4a", ".mp3", ".wav"}
+
+
+def _extract_recording(path: Path, transcriber: Transcriber | None) -> ExtractedDocument:
+    if transcriber is None or not transcriber.available():
+        raise EmptyDocumentError(f"Transcription is unavailable for {path}")
+    # These run for minutes, so say which one before going quiet.
+    LOGGER.info("Transcribing %s", path)
+    try:
+        content, metadata = transcriber.transcribe(path)
+    except UnsupportedLanguageError as error:
+        raise EmptyDocumentError(f"{path}: {error}") from error
+    except subprocess.SubprocessError as error:
+        raise UnreadableDocumentError(f"{path}: no readable audio track ({error})") from error
+    if not content.strip():
+        raise EmptyDocumentError(f"Recording holds no speech: {path}")
+    return ExtractedDocument(content=content, metadata=metadata)
 
 
 def _ooxml_problem(path: Path) -> str | None:
@@ -65,12 +88,16 @@ def _ooxml_problem(path: Path) -> str | None:
     return "saved in a pre-2007 Office format under a modern extension"
 
 
-def extract_document(path: Path, ocr: OcrEngine | None = None) -> ExtractedDocument:
+def extract_document(
+    path: Path, ocr: OcrEngine | None = None, transcriber: Transcriber | None = None
+) -> ExtractedDocument:
     suffix = path.suffix.lower()
     if suffix in _OOXML_EXTENSIONS and (problem := _ooxml_problem(path)) is not None:
         raise UnreadableDocumentError(f"{path}: {problem}")
     collector = _OcrCollector(ocr)
-    if suffix == ".pdf":
+    if suffix in RECORDING_EXTENSIONS:
+        extracted = _extract_recording(path, transcriber)
+    elif suffix == ".pdf":
         extracted = _extract_pdf(path, collector)
     elif suffix == ".docx":
         extracted = _extract_docx(path, collector)

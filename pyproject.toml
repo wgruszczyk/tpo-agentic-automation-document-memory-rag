@@ -27,6 +27,7 @@ dependencies = [
   "extract-msg>=0.54,<1",
   "pillow>=10,<13",
   "pytesseract>=0.3.10,<1",
+  "faster-whisper>=1.1,<2",
   "python-dateutil>=2.9,<3",
   "PyYAML>=6,<7",
   "typer>=0.15,<1",

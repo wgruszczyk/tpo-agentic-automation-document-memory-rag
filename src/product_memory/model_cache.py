@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-_WEIGHT_PATTERNS = ("*.safetensors", "pytorch_model.bin")
+# Enough to tell a finished download from an interrupted one, across the formats in use:
+# safetensors and pytorch for transformers, model.bin for CTranslate2.
+_WEIGHT_PATTERNS = ("*.safetensors", "pytorch_model.bin", "model.bin")
 
 
 class ModelDownloadDisabled(RuntimeError):

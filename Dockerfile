@@ -11,7 +11,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl ca-certificates \
+        curl ca-certificates ffmpeg \
         tesseract-ocr tesseract-ocr-eng tesseract-ocr-pol \
     && rm -rf /var/lib/apt/lists/*
 

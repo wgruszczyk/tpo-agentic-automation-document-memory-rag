@@ -16,7 +16,8 @@ class Settings(BaseSettings):
     scan_interval_seconds: float = 30.0
     supported_extensions: str = (
         ".txt,.md,.markdown,.rst,.log,.vtt,.srt,.pdf,.docx,.pptx,.xlsx,.msg,.eml,"
-        ".png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.gif"
+        ".png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.gif,"
+        ".mp4,.mov,.m4v,.webm,.mkv,.m4a,.mp3,.wav"
     )
 
     chunk_size: int = Field(default=1800, ge=300)
@@ -30,6 +31,20 @@ class Settings(BaseSettings):
     ocr_min_words: int = Field(default=6, ge=1)
     ocr_min_word_confidence: int = Field(default=60, ge=0, le=100)
     ocr_timeout_seconds: float = Field(default=30.0, gt=0)
+
+    # Recordings usually carry speech that exists nowhere else, so they are transcribed rather
+    # than skipped. Whisper is confident even when wrong, so a recording in a language this index
+    # does not hold is refused rather than turned into plausible nonsense.
+    enable_transcription: bool = True
+    transcription_model: str = "small"
+    transcription_languages: str = "en"
+    transcription_threads: int = Field(default=8, ge=1)
+    # Greedy decoding. Wider beams cost proportionally more for a corpus this size.
+    transcription_beam_size: int = Field(default=1, ge=1, le=10)
+    transcription_timeout_seconds: float = Field(default=3600.0, gt=0)
+    # One scan should not be spent entirely on recordings. Whatever is left over is picked up by
+    # the next pass, so ordinary documents keep being indexed in between.
+    transcription_per_scan_limit: int = Field(default=1, ge=1, le=100)
 
     embedding_provider: Literal["local_hf", "openai"] = "local_hf"
     embedding_model: str = "intfloat/multilingual-e5-base"
@@ -146,6 +161,14 @@ class Settings(BaseSettings):
     @property
     def ocr_language_list(self) -> list[str]:
         return [item.strip() for item in self.ocr_languages.replace(",", "+").split("+") if item.strip()]
+
+    @property
+    def transcription_language_list(self) -> list[str]:
+        return [
+            item.strip().lower()
+            for item in self.transcription_languages.replace(",", "+").split("+")
+            if item.strip()
+        ]
 
     @property
     def allowed_hosts(self) -> list[str]:

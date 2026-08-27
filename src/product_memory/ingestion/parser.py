@@ -12,9 +12,15 @@ import yaml
 from dateutil import parser as date_parser
 
 from product_memory.ingestion.cache import ExtractionCache, file_signature
-from product_memory.ingestion.extractors import ExtractedDocument, extract_document, strip_null_bytes
+from product_memory.ingestion.extractors import (
+    EmptyDocumentError,
+    ExtractedDocument,
+    extract_document,
+    strip_null_bytes,
+)
 from product_memory.ingestion.metadata import infer_document_metadata
 from product_memory.ingestion.ocr import OcrEngine
+from product_memory.ingestion.transcription import Transcriber
 from product_memory.settings import Settings
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -33,14 +39,11 @@ class ParsedDocument:
     metadata: dict[str, Any]
 
 
-class EmptyDocumentError(ValueError):
-    """Raised when a file carries no extractable text, such as a picture without readable text."""
-
-
 class DocumentParser:
     def __init__(self, settings: Settings, cache: ExtractionCache | None = None):
         self.settings = settings
         self.ocr = OcrEngine(settings)
+        self.transcriber = Transcriber(settings)
         self.cache = cache
 
     def parse(self, path: Path, force: bool = False) -> ParsedDocument:
@@ -82,16 +85,22 @@ class DocumentParser:
             metadata=normalized_metadata,
         )
 
+    def has_cached_extraction(self, path: Path, relative_path: str) -> bool:
+        """Whether this file's text is already extracted, so re-reading it would cost nothing."""
+        if self.cache is None:
+            return False
+        return self.cache.get(relative_path, file_signature(path)) is not None
+
     def _extract(self, path: Path, force: bool = False) -> ExtractedDocument:
         if self.cache is None:
-            return extract_document(path, self.ocr)
+            return extract_document(path, self.ocr, self.transcriber)
         signature = file_signature(path)
         relative_path = path.absolute().relative_to(self.settings.knowledge_dir.absolute()).as_posix()
         if not force:
             cached = self.cache.get(relative_path, signature)
             if cached is not None:
                 return cached
-        extracted = extract_document(path, self.ocr)
+        extracted = extract_document(path, self.ocr, self.transcriber)
         self.cache.set(relative_path, signature, extracted)
         return extracted
 

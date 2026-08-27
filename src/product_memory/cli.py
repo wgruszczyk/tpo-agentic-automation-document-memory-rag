@@ -92,6 +92,7 @@ def warmup() -> None:
     to keep later deployments reproducible and offline.
     """
     from product_memory.embeddings.factory import create_embedding_provider
+    from product_memory.ingestion.transcription import Transcriber
     from product_memory.retrieval.reranker import Reranker
     from product_memory.settings import get_settings
 
@@ -99,6 +100,10 @@ def warmup() -> None:
     report = {"embedding": create_embedding_provider(settings).profile()}
     if settings.reranker_enabled:
         report["reranker"] = Reranker(settings).warmup()
+    if settings.enable_transcription:
+        transcriber = Transcriber(settings)
+        transcriber._load_model()  # noqa: SLF001 - the download is the point
+        report["transcription"] = {"model": transcriber.repository}
     print_json(json.dumps(report, default=str))
 
 
