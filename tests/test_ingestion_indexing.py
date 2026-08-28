@@ -1,11 +1,17 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 from product_memory.ingestion.chunker import TextChunk
 from product_memory.ingestion.parser import ParsedDocument
-from product_memory.ingestion.service import IngestionService
+from product_memory.ingestion.service import (
+    DuplicateIndex,
+    IngestionService,
+    _without_derived,
+    reading_order,
+)
 from product_memory.settings import Settings
 
 
@@ -78,28 +84,128 @@ def test_index_document_uses_cursor_executemany() -> None:
     assert db.connection_instance.committed
 
 
-def test_deduplicate_documents_keeps_one_document_per_checksum() -> None:
-    primary = parsed_document("a/source.md", "same")
-    duplicate = parsed_document("b/source-copy.md", "same")
-    unique = parsed_document("c/other.md", "different")
+def test_documents_are_read_before_recordings() -> None:
+    # A scan that met files in name order would leave every document waiting behind hours of audio.
+    paths = [
+        Path("/k/a-recording.mp4"),
+        Path("/k/b-notes.md"),
+        Path("/k/c-deck.pptx"),
+        Path("/k/d-call.m4a"),
+    ]
 
-    documents, duplicates = IngestionService._deduplicate_documents([duplicate, unique, primary])  # noqa: SLF001
+    assert [path.name for path in reading_order(paths)] == [
+        "b-notes.md",
+        "c-deck.pptx",
+        "a-recording.mp4",
+        "d-call.m4a",
+    ]
 
-    assert duplicates == 1
-    assert [document.source_path for document in documents] == ["a/source.md", "c/other.md"]
-    assert documents[0].metadata["duplicate_source_paths"] == ["b/source-copy.md"]
-    assert documents[0].metadata["duplicate_count"] == 1
-    assert documents[0].metadata["all_source_paths"] == ["a/source.md", "b/source-copy.md"]
+
+def test_the_first_path_holding_some_content_is_the_one_that_is_kept() -> None:
+    seen = DuplicateIndex()
+
+    assert seen.duplicate_of("hash-a", "a/source.md") is None
+    assert seen.duplicate_of("hash-a", "b/source-copy.md") == "a/source.md"
+    assert seen.duplicate_of("hash-b", "c/other.md") is None
+
+    assert seen.count == 1
+    assert seen.duplicates_by_canonical == {"a/source.md": ["b/source-copy.md"]}
 
 
-def test_deduplicate_documents_does_not_add_duplicate_metadata_for_unique_documents() -> None:
-    document = parsed_document("source.md", "content")
+def test_content_seen_once_records_no_duplicates() -> None:
+    seen = DuplicateIndex()
 
-    documents, duplicates = IngestionService._deduplicate_documents([document])  # noqa: SLF001
+    assert seen.duplicate_of("hash-a", "source.md") is None
 
-    assert duplicates == 0
-    assert documents == [document]
-    assert "duplicate_source_paths" not in documents[0].metadata
+    assert seen.count == 0
+    assert seen.duplicates_by_canonical == {}
+
+
+def test_scan_bookkeeping_does_not_count_as_the_document_changing() -> None:
+    # These keys are written after the folder has been read, so a document whose only difference
+    # is one of them must not be re-embedded on the next scan.
+    stored = {"title": "Deck", "duplicate_count": 1, "all_source_paths": ["a", "b"]}
+    parsed = {"title": "Deck"}
+
+    assert _without_derived(stored) == _without_derived(parsed)
+
+
+def test_a_real_metadata_difference_is_still_a_change() -> None:
+    assert _without_derived({"title": "Deck"}) != _without_derived({"title": "Notes"})
+
+
+class StoredDocumentConnection(FakeConnection):
+    """Answers the 'has this document changed' lookup with a row already carrying duplicate keys."""
+
+    def __init__(self, stored_metadata: dict) -> None:
+        super().__init__()
+        self.stored_metadata = stored_metadata
+
+    def execute(self, sql: str, params: tuple | None = None):
+        super().execute(sql, params)
+        if "FROM documents WHERE source_path" in sql:
+            return SimpleNamespace(
+                fetchone=lambda: {
+                    "id": uuid4(),
+                    "title": "Deck",
+                    "content_hash": "hash-a",
+                    "effective_at": datetime(2026, 1, 1, tzinfo=UTC),
+                    "metadata": self.stored_metadata,
+                    "indexed_profile_hash": "profile",
+                    "is_active": True,
+                }
+            )
+        return SimpleNamespace(fetchone=lambda: None, fetchall=lambda: [])
+
+
+def _service_with(connection: FakeConnection) -> IngestionService:
+    database = FakeDatabase()
+    database.connection_instance = connection
+    return IngestionService(
+        Settings(_env_file=None),
+        db=database,  # type: ignore[arg-type]
+        provider=FakeProvider(),  # type: ignore[arg-type]
+        parser=None,  # type: ignore[arg-type]
+        chunker=FakeChunker(),  # type: ignore[arg-type]
+    )
+
+
+def test_a_document_is_not_rewritten_just_because_it_has_duplicates() -> None:
+    # The duplicate keys are added after the document is written, so comparing them against a
+    # freshly parsed document would report a change on every single scan, re-embedding forever.
+    connection = StoredDocumentConnection(
+        {"title": "Deck", "duplicate_source_paths": ["b/copy.md"], "duplicate_count": 1}
+    )
+    parsed = ParsedDocument(
+        source_path="a/source.md",
+        title="Deck",
+        content="content",
+        content_hash="hash-a",
+        source_modified_at=datetime(2026, 1, 1, tzinfo=UTC),
+        effective_at=datetime(2026, 1, 1, tzinfo=UTC),
+        metadata={"title": "Deck"},
+    )
+
+    outcome = _service_with(connection)._upsert_document(parsed, "profile")  # noqa: SLF001
+
+    assert outcome == "unchanged"
+
+
+def test_a_document_whose_content_really_changed_is_rewritten() -> None:
+    connection = StoredDocumentConnection({"title": "Deck"})
+    parsed = ParsedDocument(
+        source_path="a/source.md",
+        title="Deck",
+        content="new content",
+        content_hash="hash-b",
+        source_modified_at=datetime(2026, 1, 1, tzinfo=UTC),
+        effective_at=datetime(2026, 1, 1, tzinfo=UTC),
+        metadata={"title": "Deck"},
+    )
+
+    outcome = _service_with(connection)._upsert_document(parsed, "profile")  # noqa: SLF001
+
+    assert outcome == "updated"
 
 
 def parsed_document(source_path: str, content: str) -> ParsedDocument:

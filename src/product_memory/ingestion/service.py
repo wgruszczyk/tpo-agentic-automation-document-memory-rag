@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import uuid
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,45 @@ KNOWLEDGE_README_PATHS = {"README.md", ".README.md"}
 # A dot hides a file; "~$" marks the stub Office writes beside a document while it is open, which
 # carries the right extension but holds no readable document.
 IGNORED_NAME_PREFIXES = (".", "~$")
+# Written by the scan once the whole folder is known, not read from the file, so a document whose
+# only difference is one of these has not actually changed.
+_DERIVED_KEYS = ("duplicate_source_paths", "duplicate_count", "all_source_paths")
+
+
+def _without_derived(metadata: Any) -> dict[str, Any]:
+    return {key: value for key, value in dict(metadata).items() if key not in _DERIVED_KEYS}
+
+
+def reading_order(paths: list[Path]) -> list[Path]:
+    """Documents first, recordings last.
+
+    One meeting can take longer to hear than every document in the folder takes to read, so a
+    scan that met them in name order would leave ordinary files waiting behind hours of audio.
+    """
+    return sorted(paths, key=lambda path: (path.suffix.lower() in RECORDING_EXTENSIONS, path))
+
+
+class DuplicateIndex:
+    """Remembers which path first carried each checksum, so copies are indexed once.
+
+    The scan streams rather than reading the whole folder first, so this answers from what it has
+    seen so far. Paths arrive sorted, which is what makes the surviving copy predictable.
+    """
+
+    def __init__(self) -> None:
+        self.canonical_by_hash: dict[str, str] = {}
+        self.duplicates_by_canonical: dict[str, list[str]] = {}
+        self.count = 0
+
+    def duplicate_of(self, content_hash: str, source_path: str) -> str | None:
+        """Return the path already holding this content, or None when this is the first copy."""
+        canonical = self.canonical_by_hash.get(content_hash)
+        if canonical is None:
+            self.canonical_by_hash[content_hash] = source_path
+            return None
+        self.duplicates_by_canonical.setdefault(canonical, []).append(source_path)
+        self.count += 1
+        return canonical
 
 
 def _skip_reason(error: Exception, path: Path) -> str:
@@ -185,8 +223,9 @@ class IngestionService:
     def _scan(self, profile: dict[str, Any], force: bool = False) -> dict[str, Any]:
         root = self.settings.knowledge_dir
         root.mkdir(parents=True, exist_ok=True)
-        paths = self._discover_paths(root)
-        parsed_documents: list[ParsedDocument] = []
+        # Recordings are read last. One meeting can take longer to hear than every document in the
+        # folder takes to read, and ordinary files should not wait behind it.
+        paths = reading_order(self._discover_paths(root))
         added = updated = unchanged = deferred = 0
         skipped_documents: dict[str, str] = {}
         failed_documents: dict[str, str] = {}
@@ -196,6 +235,8 @@ class IngestionService:
         }
         failures = FailureReporter(known_failures)
         recordings_left = self.settings.transcription_per_scan_limit
+        seen = DuplicateIndex()
+        found_paths: set[str] = set()
 
         for path in paths:
             relative_path = self._relative_source_path(root, path)
@@ -205,25 +246,25 @@ class IngestionService:
                     continue
                 recordings_left -= 1
             try:
-                parsed_documents.append(self.parser.parse(path, force=force))
+                parsed = self.parser.parse(path, force=force)
             except (EmptyDocumentError, UnreadableDocumentError) as error:
                 # A knowledge folder holds pictures, empty files and locked workbooks that will
                 # never be indexable. Naming each one on every scan buries everything else, so
                 # they are kept as a list and only reported when the list itself changes.
                 skipped_documents[relative_path] = _skip_reason(error, path)
+                continue
             except Exception as error:
                 reason = f"{type(error).__name__}: {error}"
                 failed_documents[relative_path] = reason
                 failures.report(path, relative_path, reason)
+                continue
 
-        self._record_skipped(skipped_documents)
-        self._record_failures(failed_documents)
-        failed = len(failed_documents)
+            if seen.duplicate_of(parsed.content_hash, parsed.source_path) is not None:
+                continue
+            found_paths.add(parsed.source_path)
 
-        unique_documents, duplicates = self._deduplicate_documents(parsed_documents)
-        found_paths = {parsed.source_path for parsed in unique_documents}
-
-        for parsed in unique_documents:
+            # Each document is written as it is read, rather than the whole folder being held in
+            # memory and written at the end. A scan interrupted halfway keeps what it has done.
             outcome = self._upsert_document(parsed, profile["fingerprint"], force=force)
             if outcome == "added":
                 added += 1
@@ -231,6 +272,11 @@ class IngestionService:
                 updated += 1
             else:
                 unchanged += 1
+
+        self._record_skipped(skipped_documents)
+        self._record_failures(failed_documents)
+        self._apply_duplicate_metadata(seen.duplicates_by_canonical)
+        failed = len(failed_documents)
 
         removed = self._deactivate_missing(found_paths)
         counters = {
@@ -241,7 +287,7 @@ class IngestionService:
             "failed": failed,
             "skipped": len(skipped_documents),
             "deferred": deferred,
-            "duplicates": duplicates,
+            "duplicates": seen.count,
         }
         for outcome, count in counters.items():
             INGESTION_DOCUMENTS.labels(outcome=outcome).inc(count)
@@ -333,34 +379,43 @@ class IngestionService:
     def failed_documents(self) -> dict[str, Any]:
         return self.db.get_state(FAILED_STATE_KEY) or {"count": 0, "documents": []}
 
-    @staticmethod
-    def _deduplicate_documents(parsed_documents: list[ParsedDocument]) -> tuple[list[ParsedDocument], int]:
-        canonical_by_hash: dict[str, ParsedDocument] = {}
-        duplicates_by_hash: dict[str, list[str]] = {}
+    def _apply_duplicate_metadata(self, duplicates_by_canonical: dict[str, list[str]]) -> None:
+        """Tell each kept document which other paths hold the same content.
 
-        for parsed in sorted(parsed_documents, key=lambda document: document.source_path):
-            canonical = canonical_by_hash.get(parsed.content_hash)
-            if canonical:
-                duplicates_by_hash.setdefault(parsed.content_hash, []).append(parsed.source_path)
-                continue
-            canonical_by_hash[parsed.content_hash] = parsed
-
-        unique_documents: list[ParsedDocument] = []
-        duplicate_count = 0
-        for parsed in canonical_by_hash.values():
-            duplicate_paths = duplicates_by_hash.get(parsed.content_hash, [])
-            duplicate_count += len(duplicate_paths)
-            if not duplicate_paths:
-                unique_documents.append(parsed)
-                continue
-
-            metadata = dict(parsed.metadata)
-            metadata["duplicate_source_paths"] = duplicate_paths
-            metadata["duplicate_count"] = len(duplicate_paths)
-            metadata["all_source_paths"] = [parsed.source_path, *duplicate_paths]
-            unique_documents.append(replace(parsed, metadata=metadata))
-
-        return unique_documents, duplicate_count
+        The duplicates are only known once the whole folder has been read, while the documents
+        themselves are written as they are read, so this is applied afterwards rather than being
+        folded into the document. It is derived from the scan rather than from the file, which is
+        why _upsert_document does not treat it as the document having changed.
+        """
+        with self.db.connection() as conn:
+            stale = conn.execute(
+                "SELECT source_path FROM documents WHERE metadata ? 'duplicate_source_paths'"
+            ).fetchall()
+            for row in stale:
+                if row["source_path"] not in duplicates_by_canonical:
+                    conn.execute(
+                        f"""
+                        UPDATE documents
+                        SET metadata = metadata {' '.join(f"- '{key}'" for key in _DERIVED_KEYS)}
+                        WHERE source_path = %s
+                        """,
+                        (row["source_path"],),
+                    )
+            for canonical, duplicate_paths in duplicates_by_canonical.items():
+                conn.execute(
+                    "UPDATE documents SET metadata = metadata || %s::jsonb WHERE source_path = %s",
+                    (
+                        json.dumps(
+                            {
+                                "duplicate_source_paths": duplicate_paths,
+                                "duplicate_count": len(duplicate_paths),
+                                "all_source_paths": [canonical, *duplicate_paths],
+                            }
+                        ),
+                        canonical,
+                    ),
+                )
+            conn.commit()
 
     def _discover_paths(self, root: Path) -> list[Path]:
         paths = sorted(
@@ -431,7 +486,7 @@ class IngestionService:
                 and existing["title"] == parsed.title
                 and existing["content_hash"] == parsed.content_hash
                 and existing["effective_at"] == parsed.effective_at
-                and dict(existing["metadata"]) == parsed.metadata
+                and _without_derived(existing["metadata"]) == _without_derived(parsed.metadata)
                 and existing["indexed_profile_hash"] == profile_hash
                 and existing["is_active"]
             ):
