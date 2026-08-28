@@ -16,9 +16,12 @@ from product_memory.ingestion.extractors import (
     RECORDING_EXTENSIONS,
     EmptyDocumentError,
     ExtractedDocument,
+    _OcrCollector,
     extract_document,
+    read_screens,
     strip_null_bytes,
 )
+from product_memory.ingestion.frames import FrameSampler
 from product_memory.ingestion.metadata import infer_document_metadata
 from product_memory.ingestion.ocr import OcrEngine
 from product_memory.ingestion.transcription import Transcriber
@@ -45,6 +48,7 @@ class DocumentParser:
         self.settings = settings
         self.ocr = OcrEngine(settings)
         self.transcriber = Transcriber(settings)
+        self.frames = FrameSampler(settings)
         self.cache = cache
 
     def parse(self, path: Path, force: bool = False) -> ParsedDocument:
@@ -107,7 +111,7 @@ class DocumentParser:
 
     def _extract(self, path: Path, force: bool = False) -> ExtractedDocument:
         if self.cache is None:
-            return extract_document(path, self.ocr, self.transcriber)
+            return extract_document(path, self.ocr, self.transcriber, self.frames)
         signature = self._signature(path)
         relative_path = path.absolute().relative_to(self.settings.knowledge_dir.absolute()).as_posix()
         # A rebuild re-reads files to pick up extraction changes, but re-hearing a recording costs
@@ -115,10 +119,38 @@ class DocumentParser:
         if not force or path.suffix.lower() in RECORDING_EXTENSIONS:
             cached = self.cache.get(relative_path, signature)
             if cached is not None:
-                return cached
-        extracted = extract_document(path, self.ocr, self.transcriber)
+                return self._with_screens(path, relative_path, signature, cached)
+        extracted = extract_document(path, self.ocr, self.transcriber, self.frames)
         self.cache.set(relative_path, signature, extracted)
         return extracted
+
+    def _with_screens(
+        self, path: Path, relative_path: str, signature: str, cached: ExtractedDocument
+    ) -> ExtractedDocument:
+        """Add the shared screens to a transcript that was heard before they were being kept.
+
+        Listening to the meeting again would cost its whole length for words already known, so the
+        pictures are added on top of the transcript that is already in hand.
+        """
+        if path.suffix.lower() not in RECORDING_EXTENSIONS or not self.frames.enabled:
+            return cached
+        if self.cache is None or "screen_count" in cached.metadata:
+            return cached
+        collector = _OcrCollector(
+            self.ocr,
+            keep_images=self.settings.store_images,
+            max_bytes=self.settings.max_stored_image_bytes,
+        )
+        content, screens = read_screens(path, cached.content, collector, self.frames)
+        if not screens:
+            return cached
+        updated = ExtractedDocument(
+            content=content,
+            metadata={**cached.metadata, "screen_count": screens},
+            images=collector.images,
+        )
+        self.cache.set(relative_path, signature, updated)
+        return updated
 
     @staticmethod
     def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:

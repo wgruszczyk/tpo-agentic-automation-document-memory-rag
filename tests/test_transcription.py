@@ -160,7 +160,7 @@ def test_a_rebuild_does_not_listen_to_a_recording_it_has_already_heard(tmp_path,
     parser = _parser(tmp_path, cache)
     calls: list[Path] = []
 
-    def _extract(path, _ocr=None, _transcriber=None):
+    def _extract(path, _ocr=None, _transcriber=None, _frames=None):
         calls.append(path)
         return ExtractedDocument(content="spoken words", metadata={})
 
@@ -179,7 +179,7 @@ def test_a_rebuild_does_re_read_a_document(tmp_path, monkeypatch):
     parser = _parser(tmp_path, cache)
     calls: list[Path] = []
 
-    def _extract(path, _ocr=None, _transcriber=None):
+    def _extract(path, _ocr=None, _transcriber=None, _frames=None):
         calls.append(path)
         return ExtractedDocument(content="hello", metadata={})
 
@@ -197,7 +197,7 @@ def test_changing_the_model_makes_a_recording_worth_hearing_again(tmp_path, monk
     cache = RecordingCache()
     calls: list[Path] = []
 
-    def _extract(path, _ocr=None, _transcriber=None):
+    def _extract(path, _ocr=None, _transcriber=None, _frames=None):
         calls.append(path)
         return ExtractedDocument(content="spoken words", metadata={})
 

@@ -301,6 +301,30 @@ language is refused and reported as skipped, because the model stays fluent and 
 wrong, and invented text is worse in an index than a known gap. A file with no audio track, such as a
 silent screen capture, is skipped for the same reason.
 
+### What was on screen
+
+What someone shared is often the only record of what a meeting was looking at, so the moments the
+screen changed are kept as pictures and read for text:
+
+```dotenv
+ENABLE_VIDEO_FRAMES=true
+FRAME_SCENE_THRESHOLD=0.25
+FRAME_MAX_INTERVAL_SECONDS=120
+FRAME_MIN_WORDS=15
+FRAME_MAX_PER_RECORDING=200
+```
+
+A meeting is mostly one still image, so sampling on a clock would store the same slide hundreds of
+times and still miss the moment it changed. Frames are taken when the picture differs from what came
+before, and `FRAME_MAX_INTERVAL_SECONDS` covers a screen shared unchanged for a long stretch.
+
+The text is placed in the transcript at the point it was on screen, so a passage reads as what was
+said and what was being pointed at together, and `find_images` hands back the screen itself.
+`FRAME_MIN_WORDS` is what separates a shared document from a gallery of faces, which reads as a
+handful of names. A screen that does not change is stored once however often it is sampled.
+
+Recordings already transcribed gain their screens without being listened to again.
+
 ## When Files Do Not Appear
 
 Two lists explain almost everything:

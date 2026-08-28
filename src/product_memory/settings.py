@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     # One scan should not be spent entirely on recordings. Whatever is left over is picked up by
     # the next pass, so ordinary documents keep being indexed in between.
     transcription_per_scan_limit: int = Field(default=1, ge=1, le=100)
+    # A shared screen is often the only record of what a meeting was looking at, so the moments it
+    # changed are kept as pictures beside the words that were spoken over them.
+    enable_video_frames: bool = True
+    frame_scene_threshold: float = Field(default=0.25, gt=0, le=1)
+    frame_max_interval_seconds: int = Field(default=120, ge=10)
+    frame_max_per_recording: int = Field(default=200, ge=1, le=5000)
+    # A gallery of faces reads as about ten words of names; a shared screen reads as many more.
+    frame_min_words: int = Field(default=15, ge=1)
+    frame_width: int = Field(default=1280, ge=320)
+    frame_timeout_seconds: float = Field(default=3600.0, gt=0)
 
     embedding_provider: Literal["local_hf", "openai"] = "local_hf"
     embedding_model: str = "intfloat/multilingual-e5-base"

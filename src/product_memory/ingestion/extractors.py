@@ -25,11 +25,13 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pypdf import PdfReader
 
+from product_memory.ingestion.frames import FrameSampler
 from product_memory.ingestion.ocr import OcrEngine
 from product_memory.ingestion.transcription import (
     NoAudioError,
     Transcriber,
     UnsupportedLanguageError,
+    _timestamp,
 )
 
 # pypdf logs a WARNING for every recovered xref entry in malformed-but-readable PDFs;
@@ -89,9 +91,16 @@ class EmptyDocumentError(ValueError):
 _OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 _OOXML_EXTENSIONS = {".docx", ".pptx", ".xlsx"}
 RECORDING_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".m4a", ".mp3", ".wav"}
+# The line format the transcriber writes, which is how a screen finds its place among the words.
+_SPOKEN_AT = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]")
 
 
-def _extract_recording(path: Path, transcriber: Transcriber | None) -> ExtractedDocument:
+def _extract_recording(
+    path: Path,
+    transcriber: Transcriber | None,
+    collector: _OcrCollector | None = None,
+    sampler: FrameSampler | None = None,
+) -> ExtractedDocument:
     if transcriber is None or not transcriber.available():
         raise EmptyDocumentError(f"Transcription is unavailable for {path}")
     # These run for minutes, so say which one before going quiet.
@@ -107,7 +116,51 @@ def _extract_recording(path: Path, transcriber: Transcriber | None) -> Extracted
         raise UnreadableDocumentError(f"{path}: no readable audio track ({error})") from error
     if not content.strip():
         raise EmptyDocumentError(f"Recording holds no speech: {path}")
+    content, screens = read_screens(path, content, collector, sampler)
+    if screens:
+        metadata["screen_count"] = screens
     return ExtractedDocument(content=content, metadata=metadata)
+
+
+def read_screens(
+    path: Path,
+    transcript: str,
+    collector: _OcrCollector | None,
+    sampler: FrameSampler | None,
+) -> tuple[str, int]:
+    """Put what was on screen into the transcript at the point it was being talked about."""
+    if collector is None or sampler is None or not collector.active or not sampler.enabled:
+        return transcript, 0
+    LOGGER.info("Reading screens shared in %s", path.name)
+    sections: list[tuple[float, str]] = []
+    for frame in sampler.sample(path):
+        label = f"screen at {_timestamp(frame.offset_seconds)}"
+        text = collector.read_frame(label, frame.data)
+        if not text:
+            continue
+        sections.append((frame.offset_seconds, f"[Image text: {label}]\n{text}"))
+    return _interleave(transcript, sections), len(sections)
+
+
+def _interleave(transcript: str, sections: list[tuple[float, str]]) -> str:
+    """Place each screen just before the first thing said after it appeared."""
+    if not sections:
+        return transcript
+    lines: list[str] = []
+    pending = iter(sections)
+    upcoming = next(pending, None)
+    for line in transcript.splitlines():
+        spoken = _SPOKEN_AT.match(line)
+        if spoken:
+            seconds = int(spoken[1]) * 3600 + int(spoken[2]) * 60 + int(spoken[3])
+            while upcoming is not None and upcoming[0] <= seconds:
+                lines.append(upcoming[1])
+                upcoming = next(pending, None)
+        lines.append(line)
+    while upcoming is not None:
+        lines.append(upcoming[1])
+        upcoming = next(pending, None)
+    return "\n".join(lines)
 
 
 def _ooxml_problem(path: Path) -> str | None:
@@ -126,7 +179,10 @@ def _ooxml_problem(path: Path) -> str | None:
 
 
 def extract_document(
-    path: Path, ocr: OcrEngine | None = None, transcriber: Transcriber | None = None
+    path: Path,
+    ocr: OcrEngine | None = None,
+    transcriber: Transcriber | None = None,
+    sampler: FrameSampler | None = None,
 ) -> ExtractedDocument:
     suffix = path.suffix.lower()
     if suffix in _OOXML_EXTENSIONS and (problem := _ooxml_problem(path)) is not None:
@@ -137,7 +193,7 @@ def extract_document(
         max_bytes=ocr.settings.max_stored_image_bytes if ocr else 0,
     )
     if suffix in RECORDING_EXTENSIONS:
-        extracted = _extract_recording(path, transcriber)
+        extracted = _extract_recording(path, transcriber, collector, sampler)
     elif suffix == ".pdf":
         extracted = _extract_pdf(path, collector)
     elif suffix == ".docx":
@@ -167,6 +223,7 @@ class _OcrCollector:
         self._keep_images = keep_images
         self._max_bytes = max_bytes
         self._seen_digests: set[str] = set()
+        self._seen_frame_text: set[str] = set()
         self.sections: list[str] = []
         self.images: list[ExtractedImage] = []
         self.images_seen = 0
@@ -221,6 +278,34 @@ class _OcrCollector:
             return
         with image:
             self.add(label, image, data)
+
+    def read_frame(self, label: str, data: bytes) -> str:
+        """Read one frame of a recording, returning its text and keeping the picture.
+
+        Unlike an embedded image this adds no section of its own, because the caller places the
+        text at the point in the transcript where it was on screen.
+        """
+        if self._ocr is None or self._budget <= 0:
+            return ""
+        image = _open_image_bytes(data, label)
+        if image is None:
+            return ""
+        with image:
+            self.images_seen += 1
+            text = self._ocr.image_to_text(image)
+            if len(text.split()) < self._ocr.settings.frame_min_words:
+                # A gallery of faces reads as a handful of names and is not worth finding.
+                return ""
+            if text in self._seen_frame_text:
+                # A screen left up unchanged is the same screen, however often it is sampled.
+                # Storing it again would keep a picture no transcript line points at.
+                self.duplicates_skipped += 1
+                return ""
+            self._seen_frame_text.add(text)
+            self._budget -= 1
+            self.images_read += 1
+            self._keep(label, image, data, text)
+        return text
 
     def compose(self, text: str) -> str:
         return "\n\n".join(part for part in [text, *self.sections] if part)
