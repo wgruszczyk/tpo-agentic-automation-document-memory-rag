@@ -5,6 +5,7 @@ import io
 import logging
 import re
 import subprocess
+import warnings
 import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -34,6 +35,14 @@ from product_memory.ingestion.transcription import (
 # pypdf logs a WARNING for every recovered xref entry in malformed-but-readable PDFs;
 # these are handled automatically and not actionable, so keep them out of app logs.
 logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+# openpyxl warns that it discards features it cannot round-trip, once per workbook that uses them.
+# Only the text is being read here, and nothing is written back, so there is nothing to act on.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*extension is not supported and will be removed.*",
+    category=UserWarning,
+)
 
 LOGGER = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif"}
