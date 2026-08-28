@@ -209,6 +209,15 @@ def test_changing_the_model_makes_a_recording_worth_hearing_again(tmp_path, monk
     assert len(calls) == 2
 
 
+def test_a_file_that_vanished_has_no_cached_extraction_rather_than_raising(tmp_path):
+    # A synced folder can withdraw a file between the scan listing it and reading it. Asking
+    # whether it was already transcribed must not be what ends the pass.
+    cache = RecordingCache()
+    parser = _parser(tmp_path, cache)
+
+    assert parser.has_cached_extraction(tmp_path / "gone.mp4", "gone.mp4") is False
+
+
 def test_transcription_is_skipped_when_the_engine_is_unavailable() -> None:
     with pytest.raises(EmptyDocumentError, match="Transcription is unavailable"):
         _extract_recording(Path("meeting.mp4"), None)

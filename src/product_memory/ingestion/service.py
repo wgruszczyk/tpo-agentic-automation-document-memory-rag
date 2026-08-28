@@ -240,13 +240,17 @@ class IngestionService:
 
         for path in paths:
             relative_path = self._relative_source_path(root, path)
-            if self._is_unread_recording(path, relative_path):
-                if recordings_left <= 0:
-                    deferred += 1
-                    continue
-                recordings_left -= 1
             try:
+                if self._is_unread_recording(path, relative_path):
+                    if recordings_left <= 0:
+                        deferred += 1
+                        continue
+                    recordings_left -= 1
                 parsed = self.parser.parse(path, force=force)
+            except FileNotFoundError:
+                # A synced folder can withdraw a file between listing it and reading it. There is
+                # nothing to report: it is gone, and whatever was indexed from it is retired below.
+                continue
             except (EmptyDocumentError, UnreadableDocumentError) as error:
                 # A knowledge folder holds pictures, empty files and locked workbooks that will
                 # never be indexable. Naming each one on every scan buries everything else, so

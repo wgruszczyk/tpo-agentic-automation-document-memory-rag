@@ -90,7 +90,13 @@ class DocumentParser:
         """Whether this file's text is already extracted, so re-reading it would cost nothing."""
         if self.cache is None:
             return False
-        return self.cache.get(relative_path, self._signature(path)) is not None
+        try:
+            signature = self._signature(path)
+        except OSError:
+            # Asking about a file that is no longer there is answered, not raised: it has no
+            # cached extraction, and reading it will fail in the ordinary way a moment later.
+            return False
+        return self.cache.get(relative_path, signature) is not None
 
     def _signature(self, path: Path) -> str:
         signature = file_signature(path)
