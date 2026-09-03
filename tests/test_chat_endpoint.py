@@ -97,6 +97,30 @@ def test_a_streamed_answer_ends_the_way_the_protocol_says_it_must(
     assert "**Sources**" in text
 
 
+def test_progress_arrives_before_the_answer_and_stays_out_of_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure(monkeypatch)
+    response = _request(
+        "POST",
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+    )
+
+    lines = [line for line in response.text.splitlines() if line.startswith("data: ")]
+    deltas = [json.loads(line[6:])["choices"][0]["delta"] for line in lines[:-1]]
+    progress = "".join(delta.get("reasoning_content", "") for delta in deltas)
+    answer = "".join(delta.get("content", "") for delta in deltas)
+
+    assert "Searching" in progress
+    assert "2 passages across 2 documents" in progress
+    assert "Searching" not in answer
+    # Progress has to be on the wire before the first word of the answer, or it is decoration.
+    first_progress = next(i for i, delta in enumerate(deltas) if delta.get("reasoning_content"))
+    first_answer = next(i for i, delta in enumerate(deltas) if delta.get("content"))
+    assert first_progress < first_answer
+
+
 def test_a_request_with_no_question_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     _configure(monkeypatch)
 

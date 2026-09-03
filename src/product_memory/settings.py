@@ -171,6 +171,11 @@ class Settings(BaseSettings):
     # Answer only from what was retrieved. Off lets the model fall back on its own training, which
     # is exactly the failure this index exists to prevent.
     chat_require_evidence: bool = True
+    # Progress for someone watching a chat window. The MCP tool and the eval harness never see it.
+    chat_show_progress: bool = True
+    # How many pictures an answer may carry. Enough to show what was asked for, few enough that a
+    # slide-heavy deck does not bury the words.
+    chat_max_images: int = Field(default=4, ge=0, le=20)
     chat_timeout_seconds: float = Field(default=180.0, gt=0)
     # Shared secret for /v1. Empty leaves the endpoint unauthenticated, which is only defensible
     # while the port stays bound to loopback.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -189,6 +190,98 @@ def test_a_first_question_is_retrieved_exactly_as_asked() -> None:
     service.ask("How do payment retries work?")
 
     assert service.retriever.queries == ["How do payment retries work?"]  # type: ignore[attr-defined]
+
+
+def test_a_follow_up_is_answered_alone_even_though_it_retrieved_on_more() -> None:
+    service = _service(SOURCES)
+    conversation = [
+        ChatMessage(role="user", content="What did we decide about payment retries?"),
+        ChatMessage(role="assistant", content="Exponential backoff."),
+        ChatMessage(role="user", content="And the cap?"),
+    ]
+    list(service.stream(conversation))
+
+    asked = service.retriever.queries[-1]  # type: ignore[attr-defined]
+    prompt = service.provider.calls[0][0][-1].content  # type: ignore[attr-defined]
+
+    # The stitch belongs to retrieval. Showing it to the model made it answer every earlier turn.
+    assert "payment retries" in asked
+    assert prompt.endswith("Question: And the cap?")
+    assert "What did we decide about payment retries?" not in prompt
+
+
+def test_earlier_turns_reach_the_model_as_history_not_as_questions() -> None:
+    service = _service(SOURCES)
+    list(
+        service.stream(
+            [
+                ChatMessage(role="user", content="What did we decide about payment retries?"),
+                ChatMessage(role="assistant", content="Exponential backoff."),
+                ChatMessage(role="user", content="And the cap?"),
+            ]
+        )
+    )
+    prompt = service.provider.calls[0][0]  # type: ignore[attr-defined]
+
+    assert [message.role for message in prompt] == ["system", "user", "assistant", "user"]
+    assert prompt[1].content == "What did we decide about payment retries?"
+    assert "must not be answered again" in prompt[0].content
+
+
+def test_progress_is_reported_before_anything_can_be_written() -> None:
+    service = _service(SOURCES)
+    events = list(service.stream([ChatMessage(role="user", content="How do retries work?")]))
+
+    statuses = [event.status for event in events if event.status]
+    assert statuses[0].startswith("Searching")
+    assert "2 passages across 2 documents" in statuses[1]
+    # Whatever a window shows, the answer itself must not carry it.
+    assert events[0].status and not events[0].text
+
+
+def test_progress_stays_out_of_the_answer() -> None:
+    answer = _service(SOURCES).ask("How do retries work?")
+
+    assert "Searching" not in answer.answer
+    assert "Searching" not in answer.prose
+
+
+def test_progress_can_be_switched_off() -> None:
+    service = _service(SOURCES, chat_show_progress=False)
+    events = list(service.stream([ChatMessage(role="user", content="How do retries work?")]))
+
+    assert not [event for event in events if event.status]
+
+
+def test_a_picture_behind_a_quoted_passage_comes_back_with_the_answer() -> None:
+    from product_memory.models import ImageRef
+
+    chunk = _chunk(1, "tpo/decks/promotions.pptx", "The promotion module. [Image text: rules]")
+    chunk.images.append(
+        ImageRef(
+            id="img-1",
+            source_path="tpo/decks/promotions.pptx",
+            label="slide 12",
+            media_type="image/png",
+            width=1426,
+            height=994,
+            byte_size=1000,
+            url="http://localhost:2600/images/img-1",
+        )
+    )
+    answer = _service([chunk]).ask("I need a screenshot of the promotion module")
+
+    assert [image.id for image in answer.images] == ["img-1"]
+    # Markdown, so a chat window renders the picture rather than a link to it.
+    assert "![slide 12](http://localhost:2600/images/img-1)" in answer.answer
+    assert "img-1" in json.dumps(answer.as_dict())
+
+
+def test_an_answer_with_no_pictures_gains_no_empty_gallery() -> None:
+    answer = _service(SOURCES).ask("How do payment retries work?")
+
+    assert answer.images == []
+    assert "Screens and scans" not in answer.answer
 
 
 def test_a_conversation_must_end_with_the_user() -> None:

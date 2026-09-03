@@ -479,9 +479,33 @@ With `CHAT_REQUIRE_EVIDENCE=true`, a question the index cannot support is refuse
 token is generated. No model call, no guess, no plausible paragraph about something nobody ever
 wrote down. Turning it off is available and is almost always the wrong trade.
 
+That includes general knowledge. Ask who the president is and it will decline, because the answer
+is not in your documents — the model behind it certainly knows, and is not allowed to say. This is
+the whole point: an answer from here is always traceable to a file you own. For everything else,
+use a general assistant.
+
 The retrieved text is treated as data throughout. Documents, scans and transcripts arrive from
 places you do not fully control, and a scanned slide that says "ignore previous instructions" is
 content to report, not an order to follow.
+
+### While it works
+
+Retrieval takes seconds on a real corpus, and a cold model load takes longer, so the answer streams
+its progress first: what it is doing, then how much it found and where. That travels on the
+`reasoning_content` field rather than in the answer, so a client that understands it shows the
+progress live and folds it away, and one that does not simply ignores it. Either way the answer
+itself never carries it, and neither does the `ask` tool or the eval harness. Set
+`CHAT_SHOW_PROGRESS=false` to drop it entirely.
+
+### Screenshots in an answer
+
+Asked for a screenshot, an answer that describes one is no answer. Pictures behind the quoted
+passages come back with it, rendered inline and captioned with the file they came from, up to
+`CHAT_MAX_IMAGES`. They are the same pictures `find_images` returns, served from
+`PUBLIC_BASE_URL`, so a browser on this machine can display them and a ticket can carry them.
+
+Only pictures OCR could read something from are stored, so a screenshot nobody could search for is
+also one no answer will offer.
 
 ### Without a browser
 

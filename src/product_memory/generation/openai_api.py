@@ -118,6 +118,12 @@ def _delta(completion_id: str, delta: dict[str, Any], finish_reason: str | None)
 def iter_sse(events: Iterable[ChatEvent], completion_id: str) -> Iterator[str]:
     yield _delta(completion_id, {"role": "assistant", "content": ""}, None)
     for event in events:
+        if event.status:
+            # A client that knows this field shows progress live and folds it away once the
+            # answer starts; one that does not simply drops it. Either way the answer stays clean,
+            # which putting the same text in content would not manage.
+            yield _delta(completion_id, {"reasoning_content": f"{event.status}\n"}, None)
+            continue
         if event.text:
             yield _delta(completion_id, {"content": event.text}, None)
     yield _delta(completion_id, {}, "stop")
