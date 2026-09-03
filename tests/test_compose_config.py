@@ -51,11 +51,11 @@ def test_make_smoke_uses_container_internal_mcp_url() -> None:
     assert "product-memory smoke-test --url http://127.0.0.1:8080/mcp" in smoke_section
 
 
-def test_the_chat_ui_is_optional_pinned_and_bound_to_this_machine() -> None:
+def test_the_chat_ui_runs_with_the_stack_pinned_and_bound_to_this_machine() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     webui = compose["services"]["open-webui"]
 
-    assert webui["profiles"] == ["chat"]
+    assert "profiles" not in webui
     assert ":main" not in webui["image"] and ":" in webui["image"]
     assert webui["ports"] == ["127.0.0.1:${OPEN_WEBUI_PORT:-2605}:8080"]
 
@@ -85,4 +85,5 @@ def test_make_chat_refuses_until_conversation_is_switched_on() -> None:
 
     assert "CHAT_ENABLED=true" in chat_section
     assert "chat-check" in chat_section
-    assert "--profile chat up -d" in chat_section
+    # A plain restart keeps the environment a container was created with, so .env edits need this.
+    assert "up -d product-memory open-webui" in chat_section

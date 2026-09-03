@@ -438,11 +438,14 @@ CHAT_API_KEY=pick-something
 ```
 
 ```bash
-make restart
-make chat            # checks Ollama, then starts Open WebUI on http://localhost:2605
+make start           # recreates the container so it picks up .env
+make chat            # checks Ollama, then points you at http://localhost:2605
 ```
 
-Pick `product-memory` from the model list and ask something your documents can answer.
+Open WebUI runs with the rest of the stack, so it is there whenever the service is. Pick
+`product-memory` from the model list and ask something your documents can answer. With
+`CHAT_ENABLED=false` the window still opens but the model list is empty, because `/v1/models`
+answers 503.
 
 ### Choosing a model
 
@@ -622,7 +625,7 @@ make observability
 | Prometheus | <http://localhost:2602> | Raw metric queries and scrape health. |
 | Loki | <http://localhost:2603> | Log store. Query it through Grafana. |
 | MLflow | <http://localhost:2604> | Evaluation runs, compared over time. |
-| Open WebUI | <http://localhost:2605> | The chat window. Started separately with `make chat`. |
+| Open WebUI | <http://localhost:2605> | The chat window. Runs with the stack. |
 
 All bind to `127.0.0.1` only. The ports avoid the conventional 3000 and 5000 because macOS runs
 AirPlay Receiver on 5000.

@@ -16,6 +16,8 @@ start:
 stop:
 	$(COMPOSE) down
 
+# Restarts the process, not the container. Environment is fixed when a container is created, so
+# after editing .env use `make start` instead, which recreates it.
 restart:
 	$(COMPOSE) restart product-memory
 
@@ -80,20 +82,21 @@ query:
 	@test -n "$(q)" || (echo "Usage: make query q='What did we decide about payment retries?'" >&2; exit 2)
 	$(COMPOSE) exec product-memory product-memory query --url http://127.0.0.1:8080/mcp $(args) "$(q)"
 
-# Open WebUI, talking to this service's grounded endpoint over the compose network. Ollama itself
-# runs on the host: Docker on macOS cannot reach the GPU, and a CPU-bound model is unusable here.
+# Open WebUI runs with the core stack, talking to this service's grounded endpoint over the compose
+# network. Ollama itself runs on the host: Docker on macOS cannot reach the GPU, and a CPU-bound
+# model is unusable here. This target checks the model behind the UI and prints where to find it.
 chat:
 	@grep -q '^CHAT_ENABLED=true' .env || \
-		(echo "Set CHAT_ENABLED=true in .env first, then 'make restart'." >&2; exit 2)
+		(echo "Set CHAT_ENABLED=true in .env first." >&2; exit 2)
+	$(COMPOSE) up -d product-memory open-webui
 	$(MAKE) chat-check
-	$(COMPOSE) --profile chat up -d
 	@echo "Open WebUI http://localhost:$${OPEN_WEBUI_PORT:-2605}"
 
 chat-stop:
-	$(COMPOSE) --profile chat stop open-webui
+	$(COMPOSE) stop open-webui
 
 chat-logs:
-	$(COMPOSE) --profile chat logs -f open-webui
+	$(COMPOSE) logs -f open-webui
 
 # Is the local model server up, and does it hold the models .env asks for?
 chat-check:

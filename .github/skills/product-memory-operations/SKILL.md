@@ -94,7 +94,9 @@ make chat-check                    # is it up, and does it hold what .env asks f
 make chat                          # Open WebUI on 2605
 ```
 
-Set `CHAT_ENABLED=true` in `.env` and `make restart` first; `make chat` refuses otherwise.
+Set `CHAT_ENABLED=true` in `.env` and run `make start` first; `make chat` refuses otherwise. Use
+`make start`, not `make restart` — a container keeps the environment it was created with, so a
+plain restart never sees an edited `.env`.
 
 Things that will waste your time if forgotten:
 

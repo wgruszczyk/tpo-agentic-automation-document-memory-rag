@@ -59,7 +59,6 @@ services:
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:v0.11.3
-    profiles: ["chat"]
     restart: unless-stopped
     environment:
       # The only model it may reach is this service's grounded endpoint, on the compose network.
