@@ -35,7 +35,23 @@ TRACKED_SETTINGS = (
     "reranker_weight",
 )
 
+# Only recorded when a run actually generated answers; see run_metrics.
+TRACKED_CHAT_SETTINGS = (
+    "chat_model",
+    "chat_condense_model",
+    "chat_temperature",
+    "chat_num_ctx",
+    "chat_context_chars",
+    "chat_thinking",
+)
+
 _METRICS = ("hit_rate", "mrr", "recall", "precision", "ndcg")
+_GENERATION_METRICS = (
+    "grounded_rate",
+    "citation_coverage",
+    "citation_precision",
+    "groundedness",
+)
 
 
 def run_parameters(settings: Settings, index_profile: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +68,13 @@ def run_metrics(report: dict[str, Any]) -> dict[str, float]:
         if value is not None:
             metrics[f"latency_{name}"] = value
     metrics["questions"] = report.get("scored", 0)
+    generation = report.get("generation") or {}
+    for name in _GENERATION_METRICS:
+        if generation.get(name) is not None:
+            metrics[name] = generation[name]
+    for name, value in (generation.get("latency_seconds") or {}).items():
+        if value is not None:
+            metrics[f"answer_latency_{name}"] = value
     return metrics
 
 
@@ -83,6 +106,14 @@ def log_evaluation(
         mlflow.set_experiment(experiment)
         with mlflow.start_run(run_name=run_name) as run:
             parameters = run_parameters(settings, index_profile)
+            generation = report.get("generation") or {}
+            if generation:
+                # Only on runs that generated something. Otherwise every retrieval run carries a
+                # chat model it never used, and comparing runs turns into reading footnotes.
+                parameters.update(
+                    {name: getattr(settings, name) for name in TRACKED_CHAT_SETTINGS}
+                )
+                parameters["judge_model"] = generation.get("judge_model")
             # The same questions against a larger index are harder questions, so a score means
             # nothing without the size of the haystack it was scored against.
             parameters.update({f"corpus_{name}": value for name, value in (corpus or {}).items()})

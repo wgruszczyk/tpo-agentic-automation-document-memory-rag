@@ -108,6 +108,141 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[max(position, 0)]
 
 
+JUDGE_PROMPT = """
+You check whether an answer stayed inside its sources.
+
+Read the SOURCES, then read the ANSWER. Reply with exactly one word:
+SUPPORTED   - every factual claim in the answer is stated in the sources.
+UNSUPPORTED - the answer asserts something the sources do not say, or contradicts them.
+
+An answer that declines because the sources do not cover the question is SUPPORTED. Wording need
+not match; meaning must. Reply with the single word and nothing else.
+""".strip()
+
+
+def _judge_verdict(provider: Any, options: Any, context: str, prose: str) -> bool | None:
+    from product_memory.generation.base import ChatMessage, ChatProviderError
+
+    try:
+        result = provider.complete(
+            [
+                ChatMessage(role="system", content=JUDGE_PROMPT),
+                ChatMessage(role="user", content=f"SOURCES:\n{context}\n\nANSWER:\n{prose}"),
+            ],
+            options,
+        )
+    except ChatProviderError:
+        return None
+    verdict = result.text.strip().upper()
+    if "UNSUPPORTED" in verdict:
+        return False
+    if "SUPPORTED" in verdict:
+        return True
+    return None
+
+
+def run_generation_evaluation(
+    chat: Any, cases: list[EvalCase], judge_model: str | None = None
+) -> dict[str, Any]:
+    """Score the answers, not the retrieval underneath them.
+
+    Two of the three measures are deterministic: whether the documents a question expected were
+    among the sources the answer was built from, and how much of what it was given was expected.
+    The third asks a model whether the answer stayed inside those sources, which is the only
+    practical way to catch invention, and is worth exactly what a local judge is worth: a trend
+    to watch across runs, not a number to quote. Judging with the same model family that wrote
+    the answer flatters it.
+    """
+    from product_memory.generation.base import ChatOptions
+
+    judge_options = (
+        ChatOptions(
+            model=judge_model,
+            temperature=0.0,
+            max_tokens=8,
+            num_ctx=chat.settings.chat_num_ctx,
+            thinking=False,
+            keep_alive=chat.settings.chat_keep_alive,
+            timeout_seconds=chat.settings.chat_timeout_seconds,
+        )
+        if judge_model
+        else None
+    )
+
+    results: list[dict[str, Any]] = []
+    durations: list[float] = []
+    coverage_total = 0.0
+    precision_total = 0.0
+    scored = 0
+    grounded = 0
+    judged = 0
+    supported = 0
+
+    for case in cases:
+        started = time.perf_counter()
+        answer = chat.ask(case.question, project=case.project)
+        durations.append(time.perf_counter() - started)
+        if answer.grounded:
+            grounded += 1
+
+        cited = [citation.source_path for citation in answer.citations]
+        coverage = precision = None
+        if case.expect:
+            scored += 1
+            met = sum(
+                1
+                for item in case.expect
+                if any(item.fragment.lower() in path.lower() for path in cited)
+            )
+            coverage = met / len(case.expect)
+            relevant = sum(1 for path in cited if grade_of(path, case.expect) > 0)
+            precision = relevant / len(cited) if cited else 0.0
+            coverage_total += coverage
+            precision_total += precision
+
+        verdict = None
+        if judge_options is not None and answer.context:
+            verdict = _judge_verdict(chat.provider, judge_options, answer.context, answer.prose)
+            if verdict is not None:
+                judged += 1
+                supported += int(verdict)
+
+        results.append(
+            {
+                "question": case.question,
+                "asked": answer.question,
+                "grounded": answer.grounded,
+                "citation_coverage": round(coverage, 4) if coverage is not None else None,
+                "citation_precision": round(precision, 4) if precision is not None else None,
+                "supported": verdict,
+                "seconds": round(durations[-1], 3),
+                "cited": cited,
+                "answer": answer.prose,
+            }
+        )
+
+    def averaged(total: float, over: int) -> float | None:
+        return round(total / over, 4) if over else None
+
+    return {
+        "questions": len(cases),
+        "scored": scored,
+        "grounded_rate": averaged(float(grounded), len(cases)),
+        "citation_coverage": averaged(coverage_total, scored),
+        "citation_precision": averaged(precision_total, scored),
+        "judged": judged,
+        "groundedness": averaged(float(supported), judged),
+        "judge_model": judge_model,
+        "latency_seconds": {
+            "mean": round(sum(durations) / len(durations), 3) if durations else None,
+            "p50": round(_percentile(durations, 0.50), 3),
+            "p95": round(_percentile(durations, 0.95), 3),
+            "max": round(max(durations), 3) if durations else None,
+        },
+        "results": results,
+    }
+
+
 def run_evaluation(retriever: Any, cases: list[EvalCase], top_k: int) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     reciprocal_ranks = 0.0

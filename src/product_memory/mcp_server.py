@@ -3,20 +3,32 @@ from __future__ import annotations
 import asyncio
 import base64
 import functools
+import hmac
+import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, suppress
 from typing import Any, TypeVar
 
+import psycopg
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ImageContent
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from product_memory import __version__
+from product_memory.generation.openai_api import (
+    RequestError,
+    completion_payload,
+    error_sse,
+    iter_sse,
+    models_payload,
+    new_completion_id,
+    parse_messages,
+)
 from product_memory.inspection import inspect_documents
 from product_memory.metrics import TOOL_CALLS, TOOL_SECONDS, render
 from product_memory.runtime import Runtime
@@ -219,6 +231,24 @@ def fetch_image(image_id: str) -> ImageContent:
     )
 
 
+@mcp.tool()
+@measured("ask")
+def ask(
+    question: str,
+    project: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict:
+    """Answer a question from the private documents, in prose, with the sources it was drawn from.
+
+    Prefer retrieve_knowledge when you want to read the evidence and reason about it yourself:
+    it is faster and it hides nothing. Use this when you want a drafted grounded answer, for
+    example to paste into a ticket or a reply. Runs a local model, so it is slower than retrieval
+    and returns nothing at all when the index holds no evidence, rather than guessing.
+    """
+    return runtime.chat.ask(question, project=project, since=since, until=until).as_dict()
+
+
 @mcp.custom_route("/images/{image_id}", methods=["GET"])
 async def serve_image(request: Request) -> Response:
     found = await asyncio.to_thread(
@@ -234,6 +264,114 @@ async def serve_image(request: Request) -> Response:
             "Content-Disposition": f'inline; filename="{_download_name(label, media_type)}"',
             "Cache-Control": "private, max-age=3600",
         },
+    )
+
+
+@mcp.custom_route("/documents/{document_id}", methods=["GET"])
+async def serve_document(request: Request) -> Response:
+    """Where a citation points. Plain text, so a source can be read without an MCP client."""
+    try:
+        found = await asyncio.to_thread(runtime.retriever.fetch, request.path_params["document_id"])
+    # DataError is an id that is not even shaped like one. To someone following a link that is the
+    # same thing as an id that is gone.
+    except (KeyError, ValueError, psycopg.DataError) as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=404)
+    body = f"# {found.title}\n\n{found.text}"
+    return Response(body, media_type="text/markdown; charset=utf-8")
+
+
+def _chat_denied(request: Request) -> Response | None:
+    if not runtime.settings.chat_enabled:
+        return JSONResponse({"detail": "conversation is disabled"}, status_code=503)
+    expected = runtime.settings.chat_api_key
+    if not expected:
+        return None
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer" and hmac.compare_digest(token.strip(), expected):
+        return None
+    return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+
+async def _stream_in_thread(factory: Callable[[], Iterator[str]]) -> AsyncIterator[str]:
+    """Bridges a blocking generator onto the event loop one item at a time.
+
+    The retrieval and generation stack is synchronous throughout, so it has to leave the loop
+    free while it works; streaming is the whole point of a chat window.
+    """
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[Any] = asyncio.Queue()
+    finished = object()
+
+    def pump() -> None:
+        try:
+            for item in factory():
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+        except Exception as exc:  # noqa: BLE001 - re-raised on the loop side
+            loop.call_soon_threadsafe(queue.put_nowait, exc)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, finished)
+
+    worker = asyncio.create_task(asyncio.to_thread(pump))
+    try:
+        while True:
+            item = await queue.get()
+            if item is finished:
+                return
+            if isinstance(item, Exception):
+                raise item
+            yield item
+    finally:
+        worker.cancel()
+
+
+@mcp.custom_route("/v1/models", methods=["GET"])
+async def openai_models(request: Request) -> Response:
+    if denied := _chat_denied(request):
+        return denied
+    return JSONResponse(models_payload())
+
+
+@mcp.custom_route("/v1/chat/completions", methods=["POST"])
+async def openai_chat_completions(request: Request) -> Response:
+    if denied := _chat_denied(request):
+        return denied
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise RequestError("the request body must be a JSON object")
+        messages = parse_messages(payload)
+    except RequestError as exc:
+        return JSONResponse({"error": {"message": str(exc), "type": "invalid_request_error"}}, 400)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JSONResponse(
+            {"error": {"message": "the request body is not valid JSON", "type": "invalid_request_error"}},
+            400,
+        )
+
+    filters = {key: payload.get(key) for key in ("project", "since", "until")}
+    completion_id = new_completion_id()
+
+    if not payload.get("stream", False):
+        try:
+            answer = await asyncio.to_thread(runtime.chat.answer, messages, **filters)
+        except ValueError as exc:
+            return JSONResponse({"error": {"message": str(exc), "type": "invalid_request_error"}}, 400)
+        except Exception as exc:
+            LOGGER.exception("Grounded answer failed")
+            return JSONResponse({"error": {"message": str(exc), "type": "server_error"}}, 500)
+        return JSONResponse(completion_payload(answer, completion_id))
+
+    def produce() -> Iterator[str]:
+        try:
+            yield from iter_sse(runtime.chat.stream(messages, **filters), completion_id)
+        except Exception as exc:  # noqa: BLE001 - a streamed 200 can only report failure as text
+            LOGGER.exception("Grounded answer failed mid-stream")
+            yield from error_sse(completion_id, str(exc))
+
+    return StreamingResponse(
+        _stream_in_thread(produce),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

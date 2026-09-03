@@ -7,7 +7,7 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query eval generate-eval compare-embeddings link-knowledge test backup check-private clean reset-data
+.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query ask chat chat-stop chat-logs chat-check eval generate-eval compare-embeddings link-knowledge test backup check-private clean reset-data
 
 start:
 	@test -f .env || cp .env.example .env
@@ -79,6 +79,30 @@ smoke:
 query:
 	@test -n "$(q)" || (echo "Usage: make query q='What did we decide about payment retries?'" >&2; exit 2)
 	$(COMPOSE) exec product-memory product-memory query --url http://127.0.0.1:8080/mcp $(args) "$(q)"
+
+# Open WebUI, talking to this service's grounded endpoint over the compose network. Ollama itself
+# runs on the host: Docker on macOS cannot reach the GPU, and a CPU-bound model is unusable here.
+chat:
+	@grep -q '^CHAT_ENABLED=true' .env || \
+		(echo "Set CHAT_ENABLED=true in .env first, then 'make restart'." >&2; exit 2)
+	$(MAKE) chat-check
+	$(COMPOSE) --profile chat up -d
+	@echo "Open WebUI http://localhost:$${OPEN_WEBUI_PORT:-2605}"
+
+chat-stop:
+	$(COMPOSE) --profile chat stop open-webui
+
+chat-logs:
+	$(COMPOSE) --profile chat logs -f open-webui
+
+# Is the local model server up, and does it hold the models .env asks for?
+chat-check:
+	$(COMPOSE) exec product-memory product-memory chat-check
+
+# One grounded answer, without a browser.
+ask:
+	@test -n "$(q)" || (echo "Usage: make ask q='What did we decide about payment retries?'" >&2; exit 2)
+	$(COMPOSE) exec product-memory product-memory ask $(args) "$(q)"
 
 # Scores retrieval against eval/questions.yaml, which stays out of version control.
 eval:

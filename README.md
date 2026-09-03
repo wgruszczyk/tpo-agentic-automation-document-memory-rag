@@ -6,7 +6,9 @@ stores documents and embeddings in PostgreSQL + pgvector, and exposes retrieval 
 `http://localhost:2600/mcp`.
 
 Built for a laptop, fewer than about 500 documents, English or Polish content, GitHub Copilot and
-OpenAI Codex. It retrieves sources; it does not generate answers.
+OpenAI Codex. Retrieval is the product: it hands back sources. It can also answer in prose from a
+model running on your own machine — see [Conversation](#conversation) — but it will not invent one
+when the index holds nothing.
 
 ## When To Use It
 
@@ -29,6 +31,7 @@ into repositories where Codex works, as `AGENTS.md`.
 | `find_images` | Screenshots, diagrams and scans matching a query, as references with a url. |
 | `fetch_image` | One stored picture by id, ready to attach to a ticket. |
 | `knowledge_status` | Index status, embedding profile and counters. |
+| `ask` | A written answer with its sources, from a local model. Needs `CHAT_ENABLED=true`. |
 
 `retrieve_knowledge`, `search` and `list_documents` accept optional `since` and `until` ISO dates.
 
@@ -401,6 +404,95 @@ everything it is shown, so a whole chunk buries the few lines that answer the qu
 useful floor sits depends on your documents and their language. Decide with `make eval`, not by
 assumption — and read the warning about generated question sets above before tuning this one.
 
+## Conversation
+
+Retrieval answers with sources. This answers with prose, from a model running on your own machine,
+and shows the sources it used underneath. Nothing leaves the machine: `OLLAMA_BASE_URL` is checked
+at start-up and refused unless it points at loopback, the container host, or a private address.
+
+The chat window is [Open WebUI](https://github.com/open-webui/open-webui). It sees a single model
+called `product-memory`, which is this service's own pipeline wearing an OpenAI-compatible face:
+every turn is condensed into a standalone question, retrieved through the same ranking and
+reranking as everything else, and answered from those sources alone. Open WebUI's own RAG stack is
+switched off, and so is its access to Ollama — a raw model looks identical in the UI and answers
+from its training instead of from your documents.
+
+### Setting it up
+
+Ollama runs on the host, not in a container. Docker on macOS has no access to the GPU, so a
+containerised model falls back to the CPU and answers at a crawl.
+
+```bash
+brew install ollama
+OLLAMA_HOST=0.0.0.0 ollama serve      # so the container can reach it
+ollama pull qwen3:8b
+```
+
+Then in `.env`:
+
+```dotenv
+CHAT_ENABLED=true
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+CHAT_MODEL=qwen3:8b
+CHAT_API_KEY=pick-something
+```
+
+```bash
+make restart
+make chat            # checks Ollama, then starts Open WebUI on http://localhost:2605
+```
+
+Pick `product-memory` from the model list and ask something your documents can answer.
+
+### Choosing a model
+
+| Model | Resident | Context | Notes |
+|---|---|---|---|
+| `qwen3:4b` | 2.5 GB | 256K | The fallback when 8b makes the machine swap. |
+| `qwen3:8b` | 5.2 GB | 40K | Default. The best answer that still fits 16 GB. |
+| `qwen3:14b` | 9.3 GB | 40K | Comfortable from 32 GB up. |
+| `qwen3:30b` | 19 GB | 256K | Mixture of experts, so it runs far faster than its size suggests. |
+
+On 16 GB the budget is tight: the container already holds the embedding model, the reranker and
+Postgres. If answers start crawling, the machine is swapping — drop to `qwen3:4b`, shorten
+`CHAT_KEEP_ALIVE`, or set `OLLAMA_MAX_LOADED_MODELS=1` on the host.
+
+`CHAT_THINKING` is off by default. Qwen3 reasons before answering unless told not to, and for an
+answer confined to retrieved sources that is latency spent on nothing the reader sees.
+
+### Follow-up questions
+
+"And what about the second one?" retrieves nothing on its own, so every turn after the first is
+rewritten into a standalone question before it reaches the index. This is the single biggest lever
+on how conversational the thing feels.
+
+By default the rewrite is a stitch: the recent user turns are glued onto the latest one, which
+costs no second model in memory. Set `CHAT_CONDENSE_MODEL=qwen3:1.7b` for a real rewrite, at the
+price of another 1.4 GB resident. Start with the stitch; switch when you see follow-ups missing.
+
+### What it will not do
+
+With `CHAT_REQUIRE_EVIDENCE=true`, a question the index cannot support is refused before a single
+token is generated. No model call, no guess, no plausible paragraph about something nobody ever
+wrote down. Turning it off is available and is almost always the wrong trade.
+
+The retrieved text is treated as data throughout. Documents, scans and transcripts arrive from
+places you do not fully control, and a scanned slide that says "ignore previous instructions" is
+content to report, not an order to follow.
+
+### Without a browser
+
+```bash
+make ask q='What did we decide about payment retries?'
+make chat-check          # is Ollama up, and does it hold the models .env asks for?
+```
+
+Any OpenAI-compatible client works too, since the endpoint is the standard one:
+
+```bash
+curl -H "Authorization: Bearer $CHAT_API_KEY" http://localhost:2600/v1/models
+```
+
 ## Measuring Quality
 
 Tuning weights or swapping a model is guesswork without a fixed question set. If you have not
@@ -461,6 +553,31 @@ Use `args='--verbose'` for per-question detail and `args='--top-k 3'` for a stri
 `eval/questions.yaml` and `eval/questions.generated.yaml` are gitignored, because real questions and
 document names are usually confidential.
 
+### Scoring the answers
+
+The metrics above judge what was retrieved. `args='--answers'` also judges what was written from it,
+on the same question set:
+
+```bash
+make eval args='--answers'
+make eval args='--answers --judge qwen3:8b'
+```
+
+| Metric | Reads as |
+|---|---|
+| `grounded_rate` | Share of questions the index had anything to answer from. |
+| `citation_coverage` | Share of expected documents that ended up among the answer's sources. |
+| `citation_precision` | Share of the answer's sources that were expected. |
+| `groundedness` | Share of answers a judge found entirely supported by those sources. |
+
+The first three are arithmetic. `groundedness` is a model's opinion, and only appears when
+`--judge` names one: it is the only practical way to catch invention, and it is worth what a local
+judge is worth — a trend to watch across runs, not a number to quote. A judge from the same family
+as the writer flatters it, so use the largest model the machine will hold, and never the identical
+one you are scoring.
+
+Answers are far slower than retrievals, so expect this to take minutes rather than seconds.
+
 ### Recording runs
 
 Comparing two evaluations by hand stops working after about the third one. With the observability
@@ -505,13 +622,17 @@ make observability
 | Prometheus | <http://localhost:2602> | Raw metric queries and scrape health. |
 | Loki | <http://localhost:2603> | Log store. Query it through Grafana. |
 | MLflow | <http://localhost:2604> | Evaluation runs, compared over time. |
+| Open WebUI | <http://localhost:2605> | The chat window. Started separately with `make chat`. |
 
 All bind to `127.0.0.1` only. The ports avoid the conventional 3000 and 5000 because macOS runs
 AirPlay Receiver on 5000.
 
 The provisioned **Product Memory Overview** dashboard shows where a query spends its time — p50 and
 p95 for `embed_query`, `search_sql`, `rerank`, `documents` and `compress` — alongside index growth,
-scan health and a log panel. In Grafana's *Explore*, with the Loki datasource:
+scan health and a log panel. Its **Conversation** row covers grounded answers: time to first token,
+where an answer's time goes across `condense`, `retrieve` and `generate`, tokens read and written,
+and outcomes. `no_evidence` there is the index refusing to guess, not a fault. In Grafana's
+*Explore*, with the Loki datasource:
 
 ```logql
 {service="product-memory"}                        # everything
@@ -528,7 +649,8 @@ without touching the core stack.
 
 After the first start the service never reaches the internet. Models load from the cache volume with
 `local_files_only` and Hugging Face offline mode on, the scan touches only disk and Postgres, and the
-healthcheck calls its own loopback address.
+healthcheck calls its own loopback address. Conversation changes nothing here: the model runs on
+your machine, and a `OLLAMA_BASE_URL` that points anywhere else is refused at start-up.
 
 ```dotenv
 ALLOW_MODEL_DOWNLOAD=false
@@ -628,9 +750,16 @@ Files in `knowledge/` stay on disk and are indexed again on the next start.
 - MCP binds to `127.0.0.1:${MCP_PORT:-2600}`; PostgreSQL is private to the Compose network.
 - Host header protection is on for MCP Streamable HTTP.
 - MCP tools are read-only. Ingestion and reindexing are local CLI commands.
-- Retrieved document text is untrusted content, not executable instructions.
+- Retrieved document text is untrusted content, not executable instructions. The answer prompt says
+  so explicitly, because OCR and transcription pull text from places you do not control.
+- Inference is local by construction: a non-local `OLLAMA_BASE_URL` fails at start-up rather than
+  sending private documents somewhere one answer at a time.
+- `/v1` is guarded by `CHAT_API_KEY` when one is set, and unauthenticated when it is not — which is
+  only defensible while the port stays bound to loopback.
+- Open WebUI runs single-user with `WEBUI_AUTH=false`. Turn it on before letting anyone else reach it.
 - Add TLS, authorization and a strict host allowlist before any non-local deployment.
-- No generative extraction of decisions or requirements; the service indexes source text.
+- Answers are generated only where you ask for them. Ingestion and retrieval never call a model:
+  the index holds source text, not a model's summary of it.
 
 ## Developer Setup
 

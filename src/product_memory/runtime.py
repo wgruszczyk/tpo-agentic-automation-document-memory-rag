@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 
 from product_memory.db import Database
 from product_memory.embeddings.factory import create_embedding_provider
+from product_memory.generation.chat import ChatService
+from product_memory.generation.factory import create_chat_provider
 from product_memory.ingestion.cache import ExtractionCache
 from product_memory.ingestion.chunker import DocumentChunker
 from product_memory.ingestion.parser import DocumentParser
@@ -15,6 +17,9 @@ from product_memory.metrics import (
     INDEX_CHUNKS,
     INDEX_DOCUMENTS,
     INDEX_FAILED,
+    INDEX_IMAGE_BYTES,
+    INDEX_IMAGE_SOURCES,
+    INDEX_IMAGES,
     INDEX_SKIPPED,
 )
 from product_memory.retrieval.compressor import ContextCompressor
@@ -67,6 +72,18 @@ class Runtime:
             ContextCompressor(),
             Reranker(self.settings) if self.settings.reranker_enabled else None,
         )
+        self._chat: ChatService | None = None
+
+    @property
+    def chat(self) -> ChatService:
+        """Built on first use: the index has to serve agents whether or not Ollama is running."""
+        if not self.settings.chat_enabled:
+            raise RuntimeError("Conversation is switched off. Set CHAT_ENABLED=true in .env.")
+        if self._chat is None:
+            self._chat = ChatService(
+                self.settings, self.retriever, create_chat_provider(self.settings)
+            )
+        return self._chat
 
     def initialize(self) -> None:
         level = getattr(logging, self.settings.log_level.upper(), logging.INFO)
@@ -105,3 +122,10 @@ class Runtime:
         INDEX_BYTES.set(totals["bytes"])
         INDEX_SKIPPED.set(self.ingestion.skipped_documents().get("count", 0))
         INDEX_FAILED.set(self.ingestion.failed_documents().get("count", 0))
+        # A kind that has gone to zero must still be published, or its last value stands forever.
+        counted = {row["kind"]: row for row in self.ingestion.image_totals()}
+        for kind in ("screen", "embedded", "standalone"):
+            row = counted.get(kind)
+            INDEX_IMAGES.labels(kind=kind).set(row["images"] if row else 0)
+            INDEX_IMAGE_BYTES.labels(kind=kind).set(row["bytes"] if row else 0)
+            INDEX_IMAGE_SOURCES.labels(kind=kind).set(row["sources"] if row else 0)

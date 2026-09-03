@@ -142,6 +142,40 @@ class Settings(BaseSettings):
     reranker_weight: float = Field(default=0.5, ge=0, le=1)
     reranker_batch_size: int = Field(default=16, ge=1, le=256)
 
+    # Conversation. Off by default: an index that nobody chats with should not hold a connection
+    # open to an inference server that may not be running.
+    chat_enabled: bool = False
+    chat_provider: Literal["ollama"] = "ollama"
+    # Only ever a machine you control. create_chat_provider refuses anything that is not loopback,
+    # the docker host gateway, or a private address, so "local only" is enforced rather than meant.
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    chat_model: str = "qwen3:8b"
+    # Rewrites a follow-up into a standalone question before retrieval, which is the difference
+    # between "and what about the second one?" finding anything and finding nothing. Empty falls
+    # back to stitching the recent turns together, which costs no second model in memory.
+    chat_condense_model: str | None = None
+    # Ollama defaults a context window to 4096 regardless of what the model can hold, which would
+    # silently drop the end of the retrieved context. Always sent explicitly.
+    chat_num_ctx: int = Field(default=16384, ge=2048, le=262144)
+    chat_temperature: float = Field(default=0.2, ge=0, le=2)
+    chat_max_tokens: int = Field(default=1024, ge=64, le=32768)
+    # Qwen3 reasons before answering unless told not to. For an answer that is meant to stay inside
+    # the retrieved sources, that is latency spent on nothing the reader sees.
+    chat_thinking: bool = False
+    chat_keep_alive: str = "10m"
+    # How much of the conversation is carried into condensing. Whole turns, user and assistant.
+    chat_history_turns: int = Field(default=6, ge=0, le=50)
+    # Deliberately below default_context_chars: an agent with a large window can be handed more
+    # than a local model can read without losing the middle of it.
+    chat_context_chars: int = Field(default=12000, ge=1000, le=200000)
+    # Answer only from what was retrieved. Off lets the model fall back on its own training, which
+    # is exactly the failure this index exists to prevent.
+    chat_require_evidence: bool = True
+    chat_timeout_seconds: float = Field(default=180.0, gt=0)
+    # Shared secret for /v1. Empty leaves the endpoint unauthenticated, which is only defensible
+    # while the port stays bound to loopback.
+    chat_api_key: str | None = None
+
     mcp_allowed_hosts: str = "localhost,localhost:*,127.0.0.1,127.0.0.1:*,[::1],[::1]:*"
     log_level: str = "INFO"
     # json emits one object per line for Loki; rich stays readable in a terminal.
@@ -155,6 +189,8 @@ class Settings(BaseSettings):
         "openai_api_key",
         "openai_base_url",
         "reranker_revision",
+        "chat_condense_model",
+        "chat_api_key",
         mode="before",
     )
     @classmethod

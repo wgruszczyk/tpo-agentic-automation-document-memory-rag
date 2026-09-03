@@ -326,6 +326,28 @@ class IngestionService:
     def index_totals(self) -> dict[str, Any]:
         return self._index_totals()
 
+    def image_totals(self) -> list[dict[str, Any]]:
+        """Count stored pictures by where they came from."""
+        with self.db.connection() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT
+                      CASE
+                        WHEN label LIKE 'screen at %' THEN 'screen'
+                        WHEN source_path ~* '[.](png|jpe?g|tiff?|bmp|webp|gif)$' THEN 'standalone'
+                        ELSE 'embedded'
+                      END AS kind,
+                      count(*) AS images,
+                      count(DISTINCT source_path) AS sources,
+                      coalesce(sum(byte_size), 0) AS bytes
+                    FROM images
+                    GROUP BY 1
+                    """
+                ).fetchall()
+            ]
+
     def _is_unread_recording(self, path: Path, relative_path: str) -> bool:
         """A recording whose transcript is not already cached, so reading it costs real time."""
         if path.suffix.lower() not in RECORDING_EXTENSIONS:

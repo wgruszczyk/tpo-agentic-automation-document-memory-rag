@@ -107,6 +107,44 @@ def warmup() -> None:
     print_json(json.dumps(report, default=str))
 
 
+@app.command("chat-check")
+def chat_check() -> None:
+    """Report whether the local model server is reachable and holds the configured models."""
+    from product_memory.generation.factory import create_chat_provider
+    from product_memory.settings import get_settings
+
+    settings = get_settings()
+    if not settings.chat_enabled:
+        raise typer.BadParameter("Conversation is switched off. Set CHAT_ENABLED=true in .env.")
+    provider = create_chat_provider(settings)
+    installed = provider.available_models()
+    wanted = [name for name in (settings.chat_model, settings.chat_condense_model) if name]
+    missing = [name for name in wanted if name not in installed]
+    report = {
+        **provider.profile(),
+        "condense_model": settings.chat_condense_model or "(stitching turns, no model)",
+        "installed_models": installed,
+        "missing_models": missing,
+    }
+    print_json(json.dumps(report, default=str))
+    if missing:
+        typer.echo(f"Pull them first: {' && '.join(f'ollama pull {name}' for name in missing)}", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command("ask")
+def ask(
+    question: str = typer.Argument(..., help="Question to answer from the private documents."),
+    project: str | None = typer.Option(None, help="Optional metadata.project filter."),
+    since: str | None = typer.Option(None, help="Only documents effective on or after this ISO date."),
+    until: str | None = typer.Option(None, help="Only documents effective on or before this ISO date."),
+) -> None:
+    """Answer a question in prose from the indexed documents, using the local model."""
+    runtime = ready_runtime()
+    answer = runtime.chat.ask(question, project=project, since=since, until=until)
+    typer.echo(answer.answer)
+
+
 @app.command("generate-eval")
 def generate_eval(
     count: int = typer.Option(50, min=1, max=500, help="How many questions to generate."),
@@ -245,6 +283,12 @@ def evaluate(
     track: bool = typer.Option(False, help="Record the run in MLflow for later comparison."),
     experiment: str = typer.Option("product-memory", help="MLflow experiment to record under."),
     run_name: str = typer.Option("", help="Name this run, so it is recognisable in MLflow."),
+    answers: bool = typer.Option(
+        False, help="Also score the answers the local model writes, not only what was retrieved."
+    ),
+    judge: str = typer.Option(
+        "", help="Model that decides whether each answer stayed inside its sources."
+    ),
 ) -> None:
     """Score retrieval against a question set and report hit rate and mean reciprocal rank."""
     from product_memory.evaluation import load_cases, run_evaluation
@@ -255,7 +299,15 @@ def evaluate(
             f"{path} does not exist. Copy eval/questions.example.yaml and fill in real questions."
         )
     runtime = ready_runtime()
-    report = run_evaluation(runtime.retriever, load_cases(path), top_k)
+    cases = load_cases(path)
+    report = run_evaluation(runtime.retriever, cases, top_k)
+
+    if answers or judge:
+        from product_memory.evaluation import run_generation_evaluation
+
+        report["generation"] = run_generation_evaluation(
+            runtime.chat, cases, judge_model=judge or None
+        )
 
     if track:
         from product_memory.tracking import log_evaluation
@@ -282,6 +334,8 @@ def evaluate(
 
     if not verbose:
         report.pop("results")
+        if isinstance(report.get("generation"), dict):
+            report["generation"].pop("results")
     print_json(json.dumps(report, default=str))
 
 

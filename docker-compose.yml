@@ -26,6 +26,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Ollama runs on the host, not here: Docker on macOS has no access to the GPU, so a
+    # containerised model would fall back to the CPU and answer at a crawl.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - "${HOST_KNOWLEDGE_DIR:-./knowledge}:/knowledge:ro"
       - "./eval:/eval:ro"
@@ -52,6 +56,41 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.11.3
+    profiles: ["chat"]
+    restart: unless-stopped
+    environment:
+      # The only model it may reach is this service's grounded endpoint, on the compose network.
+      # Ollama is deliberately not exposed to it: a raw model with no sources attached looks
+      # identical in the UI and answers from its training instead of from your documents.
+      ENABLE_OLLAMA_API: "false"
+      OPENAI_API_BASE_URLS: "http://product-memory:8080/v1"
+      OPENAI_API_KEYS: "${CHAT_API_KEY:-product-memory-local-only}"
+      WEBUI_SECRET_KEY: "${WEBUI_SECRET_KEY:-product-memory-local-only}"
+      # Single user on loopback. Turn this on and remove the port binding's 127.0.0.1 if it ever
+      # needs to serve more than the person sitting at the machine.
+      WEBUI_AUTH: "false"
+      ENABLE_SIGNUP: "false"
+      # Everything below keeps the container from reaching the internet. Its own RAG stack would
+      # otherwise download embedding models and duplicate the index this service already holds.
+      RAG_EMBEDDING_ENGINE: ""
+      AUDIO_STT_ENGINE: ""
+      ENABLE_WEB_SEARCH: "false"
+      ENABLE_IMAGE_GENERATION: "false"
+      ENABLE_VERSION_UPDATE_CHECK: "false"
+      HF_HUB_OFFLINE: "1"
+      ANONYMIZED_TELEMETRY: "false"
+      DO_NOT_TRACK: "true"
+      SCARF_NO_ANALYTICS: "true"
+    volumes:
+      - open_webui_data:/app/backend/data
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-2605}:8080"
+    depends_on:
+      product-memory:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:v3.1.0
@@ -145,6 +184,8 @@ volumes:
     name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_postgres_data
   huggingface_cache:
     name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_huggingface_cache
+  open_webui_data:
+    name: ${COMPOSE_PROJECT_NAME:-tpo-agentic-automation-document-memory-rag}_open_webui_data
   prometheus_data:
   loki_data:
   promtail_data:

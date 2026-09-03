@@ -49,3 +49,40 @@ def test_make_smoke_uses_container_internal_mcp_url() -> None:
     smoke_section = makefile.split("\nsmoke:\n", maxsplit=1)[1].split("\nquery:\n", maxsplit=1)[0]
 
     assert "product-memory smoke-test --url http://127.0.0.1:8080/mcp" in smoke_section
+
+
+def test_the_chat_ui_is_optional_pinned_and_bound_to_this_machine() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    webui = compose["services"]["open-webui"]
+
+    assert webui["profiles"] == ["chat"]
+    assert ":main" not in webui["image"] and ":" in webui["image"]
+    assert webui["ports"] == ["127.0.0.1:${OPEN_WEBUI_PORT:-2605}:8080"]
+
+
+def test_the_chat_ui_reaches_only_this_service_and_nothing_outside() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    environment = compose["services"]["open-webui"]["environment"]
+
+    assert environment["OPENAI_API_BASE_URLS"] == "http://product-memory:8080/v1"
+    # A raw model looks the same in the UI and answers from its training instead of the index.
+    assert environment["ENABLE_OLLAMA_API"] == "false"
+    assert environment["ENABLE_WEB_SEARCH"] == "false"
+    assert environment["HF_HUB_OFFLINE"] == "1"
+    assert environment["ANONYMIZED_TELEMETRY"] == "false"
+
+
+def test_the_service_can_reach_a_model_running_on_the_host() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+
+    assert "host.docker.internal:host-gateway" in compose["services"]["product-memory"]["extra_hosts"]
+
+
+def test_make_chat_refuses_until_conversation_is_switched_on() -> None:
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    chat_section = makefile.split("\nchat:\n", maxsplit=1)[1].split("\nchat-stop:\n", maxsplit=1)[0]
+
+    assert "CHAT_ENABLED=true" in chat_section
+    assert "chat-check" in chat_section
+    assert "--profile chat up -d" in chat_section

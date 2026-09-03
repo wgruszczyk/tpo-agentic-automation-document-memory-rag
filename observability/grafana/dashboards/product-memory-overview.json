@@ -1,12 +1,17 @@
 {
   "uid": "product-memory-overview",
   "title": "Product Memory Overview",
-  "tags": ["product-memory"],
+  "tags": [
+    "product-memory"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -14,7 +19,10 @@
         "label": "Log level",
         "type": "custom",
         "query": "DEBUG,INFO,WARNING,ERROR",
-        "current": { "text": "INFO", "value": "INFO" },
+        "current": {
+          "text": "INFO",
+          "value": "INFO"
+        },
         "options": [],
         "includeAll": false,
         "multi": false
@@ -25,52 +33,142 @@
     {
       "type": "row",
       "title": "Index",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
     },
     {
       "type": "stat",
       "title": "Documents",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
-      "targets": [{ "expr": "product_memory_index_documents", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "product_memory_index_documents",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "stat",
       "title": "Chunks",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
-      "targets": [{ "expr": "product_memory_index_chunks", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "product_memory_index_chunks",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "stat",
       "title": "Index size",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
-      "targets": [{ "expr": "product_memory_index_bytes", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "product_memory_index_bytes",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "stat",
       "title": "Excluded files",
       "description": "Knowledge files with no indexable text. Run `make skipped` for the list.",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
-      "targets": [{ "expr": "product_memory_index_skipped_documents", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "product_memory_index_skipped_documents",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "row",
       "title": "Query latency",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
     },
     {
       "type": "timeseries",
       "title": "Retrieval stage p95",
       "description": "Where a query spends its time. search_sql is the pgvector scan, rerank is the cross-encoder.",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(product_memory_stage_seconds_bucket[$__rate_interval])))",
@@ -78,13 +176,26 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "timeseries",
       "title": "Retrieval stage p50",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum by (le, stage) (rate(product_memory_stage_seconds_bucket[$__rate_interval])))",
@@ -92,13 +203,26 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "timeseries",
       "title": "MCP tool latency p95",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(product_memory_tool_seconds_bucket[$__rate_interval])))",
@@ -106,13 +230,26 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "timeseries",
       "title": "MCP tool calls",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
       "targets": [
         {
           "expr": "sum by (tool, outcome) (rate(product_memory_tool_calls_total[$__rate_interval]))",
@@ -120,18 +257,36 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "row",
       "title": "Ingestion",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      }
     },
     {
       "type": "timeseries",
       "title": "Scan duration p95",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by (le) (rate(product_memory_ingestion_seconds_bucket[$__rate_interval])))",
@@ -139,13 +294,26 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "timeseries",
       "title": "Documents per scan outcome",
-      "datasource": { "type": "prometheus", "uid": "product-memory-prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
       "targets": [
         {
           "expr": "sum by (outcome) (rate(product_memory_ingestion_documents_total[$__rate_interval]))",
@@ -153,18 +321,160 @@
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Conversation",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Time to first token p95",
+      "description": "The number that decides whether the chat window feels usable.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(product_memory_chat_time_to_first_token_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Answer stage p95",
+      "description": "condense and retrieve should stay small; generate is the local model's own pace.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(product_memory_chat_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Answers by outcome",
+      "description": "no_evidence is the index refusing to guess, not a fault.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(product_memory_chat_calls_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens per second",
+      "description": "Prompt tokens track how much context each answer is carrying.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "product-memory-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(product_memory_chat_tokens_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
     },
     {
       "type": "row",
       "title": "Logs",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      }
     },
     {
       "type": "logs",
       "title": "Service logs",
-      "datasource": { "type": "loki", "uid": "product-memory-loki" },
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 32 },
+      "datasource": {
+        "type": "loki",
+        "uid": "product-memory-loki"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
       "targets": [
         {
           "expr": "{service=\"product-memory\"} | level =~ \"$level|WARNING|ERROR\"",

@@ -36,6 +36,37 @@ class ContextCompressor:
             used += len(block)
         return "\n".join(blocks)
 
+    def pack_numbered(
+        self, chunks: list[ChunkResult], max_chars: int
+    ) -> tuple[str, list[ChunkResult]]:
+        """The same selection as pack, but labelled [1..n] and paired with what each label means.
+
+        A local model asked to cite document_id=8f3a... will get it wrong often enough to matter,
+        and a wrong citation is worse than none. Small integers it can copy, and the caller keeps
+        the mapping back to the real source.
+        """
+        selected = self._diverse_deduplicated(chunks)
+        blocks: list[str] = []
+        cited: list[ChunkResult] = []
+        used = 0
+        for chunk in selected:
+            marker = len(cited) + 1
+            header = (
+                f"[{marker}] path={chunk.source_path} "
+                f"date={chunk.effective_at.date().isoformat()}\n"
+            )
+            block = header + chunk.content.strip() + f"\n[/{marker}]\n"
+            if used + len(block) > max_chars:
+                # Half a source reads as a complete one and gets cited as if it were, so the
+                # budget cuts between sources. Unless nothing fits at all, which beats no context.
+                if cited:
+                    break
+                block = block[: max(max_chars, len(header) + 200)]
+            blocks.append(block)
+            cited.append(chunk)
+            used += len(block)
+        return "\n".join(blocks), cited
+
     @classmethod
     def _diverse_deduplicated(cls, chunks: list[ChunkResult]) -> list[ChunkResult]:
         unique: list[ChunkResult] = []

@@ -87,6 +87,63 @@ INDEX_BYTES = Gauge(
     registry=REGISTRY,
 )
 
+# Split by where the picture came from: a shared screen in a recording, a picture embedded in a
+# document, or a file that is itself a picture. They arrive from different work and cost differently.
+INDEX_IMAGES = Gauge(
+    "product_memory_index_images",
+    "Stored pictures that can be returned with an answer.",
+    ["kind"],
+    registry=REGISTRY,
+)
+
+INDEX_IMAGE_BYTES = Gauge(
+    "product_memory_index_image_bytes",
+    "Disk used by stored pictures.",
+    ["kind"],
+    registry=REGISTRY,
+)
+
+INDEX_IMAGE_SOURCES = Gauge(
+    "product_memory_index_image_sources",
+    "Files that contributed at least one stored picture.",
+    ["kind"],
+    registry=REGISTRY,
+)
+
+# Generation runs on a local model, so a slow answer is measured in tens of seconds rather than
+# the fractions the retrieval buckets were drawn for.
+_GENERATION_BUCKETS = (0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0, 300.0)
+
+CHAT_SECONDS = Histogram(
+    "product_memory_chat_seconds",
+    "Duration of one stage of a grounded answer.",
+    labelnames=("stage",),
+    buckets=_GENERATION_BUCKETS,
+    registry=REGISTRY,
+)
+
+# The number that decides whether the thing feels usable. Everything after the first token streams.
+CHAT_TTFT_SECONDS = Histogram(
+    "product_memory_chat_time_to_first_token_seconds",
+    "Delay between a question arriving and the first token of its answer.",
+    buckets=_GENERATION_BUCKETS,
+    registry=REGISTRY,
+)
+
+CHAT_TOKENS = Counter(
+    "product_memory_chat_tokens_total",
+    "Tokens read and written by the local model.",
+    labelnames=("kind",),
+    registry=REGISTRY,
+)
+
+CHAT_CALLS = Counter(
+    "product_memory_chat_calls_total",
+    "Grounded answers, by outcome. no_evidence means the index held nothing worth answering from.",
+    labelnames=("outcome",),
+    registry=REGISTRY,
+)
+
 
 @contextmanager
 def observe(metric: Histogram, **labels: str) -> Iterator[None]:
@@ -101,6 +158,12 @@ def observe(metric: Histogram, **labels: str) -> Iterator[None]:
 @contextmanager
 def stage(name: str) -> Iterator[None]:
     with observe(STAGE_SECONDS, stage=name):
+        yield
+
+
+@contextmanager
+def chat_stage(name: str) -> Iterator[None]:
+    with observe(CHAT_SECONDS, stage=name):
         yield
 
 

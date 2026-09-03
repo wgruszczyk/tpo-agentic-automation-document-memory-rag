@@ -1,6 +1,6 @@
 ---
 name: product-memory-operations
-description: 'Use when running, feeding, diagnosing or measuring this Product Memory RAG service: adding knowledge folders, files not appearing in the index, ingestion failures or skipped documents, running an evaluation, generating a question set, comparing embedding models, reading Grafana or MLflow, or changing a model safely.'
+description: 'Use when running, feeding, diagnosing or measuring this Product Memory RAG service: adding knowledge folders, files not appearing in the index, ingestion failures or skipped documents, running an evaluation, generating a question set, comparing embedding models, reading Grafana or MLflow, changing a model safely, or setting up and troubleshooting the local chat model and chat UI.'
 argument-hint: 'What do you want to do — add knowledge, diagnose ingestion, or measure quality?'
 ---
 
@@ -74,6 +74,45 @@ Read metrics as: `hit_rate` did an expected document come back at all, `mrr` how
 `recall` how many of them, `precision` falls as `top_k` rises, `ndcg` needs grades to mean anything.
 Below roughly 50 questions, a few points is indistinguishable from luck.
 
+`make eval args="--answers"` scores the written answers on the same set: `citation_coverage` and
+`citation_precision` are arithmetic over the sources each answer used. Adding `--judge <model>` asks
+a local model whether each answer stayed inside those sources. That number is a trend, not a fact —
+a judge from the same family as the writer flatters it, so use the largest model that fits and never
+the identical one being scored. Answers take minutes where retrievals take seconds.
+
+## Conversation
+
+Retrieval is unaffected by any of this; conversation is a layer on top and off by default.
+
+Ollama runs **on the host**, never in the container: Docker on macOS cannot reach the GPU, so a
+containerised model falls back to the CPU and is unusable.
+
+```bash
+OLLAMA_HOST=0.0.0.0 ollama serve   # 0.0.0.0, or the container cannot reach it
+ollama pull qwen3:8b
+make chat-check                    # is it up, and does it hold what .env asks for?
+make chat                          # Open WebUI on 2605
+```
+
+Set `CHAT_ENABLED=true` in `.env` and `make restart` first; `make chat` refuses otherwise.
+
+Things that will waste your time if forgotten:
+
+- **Connection refused from inside the container** — Ollama defaults to listening on `127.0.0.1`,
+  which is not reachable across the container boundary. `OLLAMA_HOST=0.0.0.0`.
+- **A non-local `OLLAMA_BASE_URL` fails at start-up, deliberately.** Only loopback, the container
+  host, and private addresses are accepted. This is the guarantee that documents stay on the machine.
+- **16 GB is tight.** The container already holds the embedding model, the reranker and Postgres.
+  If answers crawl, the machine is swapping: drop to `qwen3:4b`, shorten `CHAT_KEEP_ALIVE`, or leave
+  `CHAT_CONDENSE_MODEL` empty so no second model stays resident.
+- **"I have nothing in the knowledge base"** is `CHAT_REQUIRE_EVIDENCE` working, not a bug. Nothing
+  cleared `MIN_SEMANTIC_SCORE`. Check with `make query q='...'` before blaming the model.
+- **Follow-ups that retrieve nothing** mean the condensing stitch was not enough. Set
+  `CHAT_CONDENSE_MODEL=qwen3:1.7b` for a real rewrite.
+- **Open WebUI's own RAG and its Ollama access are switched off on purpose.** Re-enabling either
+  gives you a model that looks identical in the UI and answers from its training instead of your
+  documents.
+
 ## Changing a model
 
 A full reindex re-embeds every chunk and holds the service down while it runs, so measure before
@@ -97,8 +136,10 @@ make observability      # Prometheus, Loki, Promtail, Grafana, MLflow
 make metrics            # raw scrape, when a dashboard panel is empty
 ```
 
-Grafana on 2601 for query latency by stage, index growth and logs; MLflow on 2604 for evaluation
-runs and their comparison. `LOG_FORMAT=json` is required for Loki to index log fields.
+Grafana on 2601 for query latency by stage, index growth and logs; its **Conversation** row covers
+time to first token, where an answer's time goes, and outcomes — `no_evidence` there is the index
+refusing to guess. MLflow on 2604 for evaluation runs and their comparison. `LOG_FORMAT=json` is
+required for Loki to index log fields.
 
 `histogram_quantile` over a rate returns nothing until Prometheus has scraped a *changing* counter
 twice, so panels look broken for the first minute after a restart.
