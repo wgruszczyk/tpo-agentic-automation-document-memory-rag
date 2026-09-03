@@ -81,9 +81,22 @@ def test_the_service_can_reach_a_model_running_on_the_host() -> None:
 def test_make_chat_refuses_until_conversation_is_switched_on() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
-    chat_section = makefile.split("\nchat:\n", maxsplit=1)[1].split("\nchat-stop:\n", maxsplit=1)[0]
+    chat_section = makefile.split("\nchat: branding\n", maxsplit=1)[1].split("\nchat-stop:\n", maxsplit=1)[0]
 
     assert "CHAT_ENABLED=true" in chat_section
     assert "chat-check" in chat_section
     # A plain restart keeps the environment a container was created with, so .env edits need this.
     assert "up -d product-memory open-webui" in chat_section
+
+
+def test_branding_is_one_mounted_file_and_is_written_before_the_ui_starts() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    webui = compose["services"]["open-webui"]
+
+    # Mounting the whole static directory would hide the image's own assets behind it.
+    assert "./branding/custom.css:/app/backend/open_webui/static/custom.css:ro" in webui["volumes"]
+    assert webui["environment"]["WEBUI_NAME"] == "${BRAND_NAME:-Product Memory}"
+    # Docker creates a directory in its place if the file is missing, so it must exist first.
+    assert "\nstart: branding\n" in makefile
+    assert "\nchat: branding\n" in makefile

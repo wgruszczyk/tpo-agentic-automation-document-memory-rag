@@ -1,0 +1,42 @@
+/* Rendered to branding/custom.css by `make branding`. Edit this template, not the output. */
+
+:root {
+  --brand-accent: __BRAND_ACCENT__;
+  --brand-surface: __BRAND_SURFACE__;
+  --brand-font: __BRAND_FONT__;
+}
+
+/* Selectors stay generic on purpose. Open WebUI is a Tailwind build with generated class names,
+   so anything more specific breaks on their next release. */
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: var(--brand-font);
+}
+
+body {
+  background-color: var(--brand-surface);
+}
+
+::selection {
+  background-color: var(--brand-accent);
+  color: #fff;
+}
+
+a:not([class]) {
+  color: var(--brand-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-accent);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--brand-accent);
+}
+
+__BRAND_LOGO_RULE__

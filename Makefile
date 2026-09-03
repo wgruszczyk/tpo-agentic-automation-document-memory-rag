@@ -7,9 +7,9 @@ endif
 
 COMPOSE := docker compose $(COMPOSE_FILES)
 
-.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query ask chat chat-stop chat-logs chat-check eval generate-eval compare-embeddings link-knowledge test backup check-private clean reset-data
+.PHONY: start stop restart logs status skipped failures warmup observability observability-stop grafana prometheus mlflow metrics ingest reindex rebuild smoke query ask chat chat-stop chat-logs chat-check eval generate-eval compare-embeddings link-knowledge branding test backup check-private clean reset-data
 
-start:
+start: branding
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) up -d --build
 
@@ -85,7 +85,7 @@ query:
 # Open WebUI runs with the core stack, talking to this service's grounded endpoint over the compose
 # network. Ollama itself runs on the host: Docker on macOS cannot reach the GPU, and a CPU-bound
 # model is unusable here. This target checks the model behind the UI and prints where to find it.
-chat:
+chat: branding
 	@grep -q '^CHAT_ENABLED=true' .env || \
 		(echo "Set CHAT_ENABLED=true in .env first." >&2; exit 2)
 	$(COMPOSE) up -d product-memory open-webui
@@ -126,6 +126,12 @@ compare-embeddings:
 link-knowledge:
 	@test -f .env || cp .env.example .env
 	$(PYTHON) scripts/link_knowledge.py
+
+# Renders the BRAND_* settings into the stylesheet Open WebUI serves. Recreate the container
+# afterwards to pick it up; `make start` does both.
+branding:
+	@test -f .env || cp .env.example .env
+	$(PYTHON) scripts/branding.py
 
 test:
 	$(PYTHON) -m pytest

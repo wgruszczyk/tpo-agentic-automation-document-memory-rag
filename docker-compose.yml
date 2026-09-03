@@ -68,6 +68,9 @@ services:
       OPENAI_API_BASE_URLS: "http://product-memory:8080/v1"
       OPENAI_API_KEYS: "${CHAT_API_KEY:-product-memory-local-only}"
       WEBUI_SECRET_KEY: "${WEBUI_SECRET_KEY:-product-memory-local-only}"
+      # Open WebUI appends "(Open WebUI)" to whatever this is set to. CUSTOM_NAME would replace the
+      # name outright but polls their servers to do it, which this stack does not do.
+      WEBUI_NAME: "${BRAND_NAME:-Product Memory}"
       # Single user on loopback. Turn this on and remove the port binding's 127.0.0.1 if it ever
       # needs to serve more than the person sitting at the machine.
       WEBUI_AUTH: "false"
@@ -85,6 +88,9 @@ services:
       SCARF_NO_ANALYTICS: "true"
     volumes:
       - open_webui_data:/app/backend/data
+      # The image ships this file empty and loads it on every page. Written by `make branding`,
+      # which must run first: Docker would otherwise create a directory in its place.
+      - ./branding/custom.css:/app/backend/open_webui/static/custom.css:ro
     ports:
       - "127.0.0.1:${OPEN_WEBUI_PORT:-2605}:8080"
     depends_on:

@@ -38,6 +38,10 @@ product-memory-backup.sql
 # Observability runtime data
 /observability/**/data/
 
+# Your logo and the stylesheet generated from it
+/branding/custom.css
+/branding/logo.*
+
 # Local knowledge documents
 /knowledge/**
 !/knowledge/
