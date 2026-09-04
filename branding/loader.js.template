@@ -1,0 +1,18 @@
+// Rendered to branding/loader.js by `make branding`. Edit this template, not the output.
+// The tab icon is a <link> in index.html, which a stylesheet cannot reach.
+(function () {
+  var href = '__BRAND_FAVICON_DATA__';
+
+  function apply() {
+    var links = document.querySelectorAll('link[rel~="icon"]');
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].getAttribute('href') === href) continue;
+      links[i].type = '__BRAND_FAVICON_MIME__';
+      links[i].setAttribute('href', href);
+    }
+  }
+
+  apply();
+  // The app appends an icon link of its own once it hydrates, and the last one declared wins.
+  new MutationObserver(apply).observe(document.head, { childList: true, subtree: true });
+})();

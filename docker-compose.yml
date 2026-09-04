@@ -58,7 +58,13 @@ services:
       retries: 12
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.11.3
+    # A one-line layer over the pinned upstream image, to drop the name suffix it hardcodes.
+    build:
+      context: .
+      dockerfile: Dockerfile.open-webui
+      args:
+        OPEN_WEBUI_IMAGE: ghcr.io/open-webui/open-webui:v0.11.3
+    image: product-memory/open-webui:v0.11.3
     restart: unless-stopped
     environment:
       # The only model it may reach is this service's grounded endpoint, on the compose network.
@@ -88,9 +94,10 @@ services:
       SCARF_NO_ANALYTICS: "true"
     volumes:
       - open_webui_data:/app/backend/data
-      # The image ships this file empty and loads it on every page. Written by `make branding`,
-      # which must run first: Docker would otherwise create a directory in its place.
+      # The image ships these two files empty and loads them on every page. Written by
+      # `make branding`, which must run first: Docker would otherwise create directories instead.
       - ./branding/custom.css:/app/backend/open_webui/static/custom.css:ro
+      - ./branding/loader.js:/app/backend/open_webui/static/loader.js:ro
     ports:
       - "127.0.0.1:${OPEN_WEBUI_PORT:-2605}:8080"
     depends_on:

@@ -40,7 +40,9 @@ product-memory-backup.sql
 
 # Your logo and the stylesheet generated from it
 /branding/custom.css
+/branding/loader.js
 /branding/logo.*
+/branding/favicon.*
 
 # Local knowledge documents
 /knowledge/**

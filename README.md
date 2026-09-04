@@ -507,6 +507,49 @@ passages come back with it, rendered inline and captioned with the file they cam
 Only pictures OCR could read something from are stored, so a screenshot nobody could search for is
 also one no answer will offer.
 
+### Making it look like yours
+
+Open WebUI has no branding settings worth using: `WEBUI_NAME` appends `(Open WebUI)` to whatever
+you give it, and `CUSTOM_NAME` replaces the name outright but polls their servers to do it, which
+nothing in this stack does. What it does have is an empty `custom.css` it loads on every page.
+
+```dotenv
+BRAND_NAME=Product Memory
+BRAND_LOGO=branding/logo.png
+BRAND_FAVICON=
+BRAND_ACCENT=#0069b4
+BRAND_SURFACE=#101418
+BRAND_FONT=Inter, system-ui, sans-serif
+```
+
+```bash
+make branding        # renders branding/custom.css and branding/loader.js
+make start           # recreates the container so it picks the files up
+```
+
+`make start` and `make chat` run `make branding` first, because Docker creates a directory in
+place of a bind-mounted file that does not exist yet.
+
+The logo is inlined into the stylesheet as a data URI rather than mounted over `/static`, so none
+of Open WebUI's own assets end up hidden behind a volume. `BRAND_FAVICON` falls back to the logo
+and is applied by `loader.js`, the other empty file Open WebUI loads on every page: the tab icon
+is a `<link>`, which no stylesheet can reach. Your images and both generated files are gitignored;
+the templates they come from are not. Values are matched against a narrow pattern before they are
+written, since a stray brace in a colour would end the rule and let the rest of the value become
+markup of its own.
+
+Two things worth knowing before you set a logo. Open WebUI's licence
+[restricts replacing its marks](https://docs.openwebui.com/license), with an exemption for
+deployments of 50 or fewer users in a rolling 30-day window — read it and decide for yourself.
+And the selectors here are deliberately generic because the UI is a Tailwind build with generated
+class names, so anything more specific would break on their next release.
+
+`BRAND_NAME` alone would show up as `Your Name (Open WebUI)`, because their `env.py` appends the
+suffix whenever the name is overridden. [Dockerfile.open-webui](Dockerfile.open-webui) is a
+one-line layer over the pinned upstream image that removes it, and verifies its own edit rather
+than trusting a `sed` that may have matched nothing. It rests on the same 50-user exemption, so
+delete it and the `build:` block in compose if this ever serves a crowd.
+
 ### Without a browser
 
 ```bash

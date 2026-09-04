@@ -57,7 +57,19 @@ def test_the_chat_ui_runs_with_the_stack_pinned_and_bound_to_this_machine() -> N
 
     assert "profiles" not in webui
     assert ":main" not in webui["image"] and ":" in webui["image"]
+    assert ":main" not in webui["build"]["args"]["OPEN_WEBUI_IMAGE"]
     assert webui["ports"] == ["127.0.0.1:${OPEN_WEBUI_PORT:-2605}:8080"]
+
+
+def test_the_name_suffix_is_dropped_by_a_layer_over_the_upstream_image() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    dockerfile = (ROOT / "Dockerfile.open-webui").read_text(encoding="utf-8")
+
+    assert compose["services"]["open-webui"]["build"]["dockerfile"] == "Dockerfile.open-webui"
+    # Their licence allows this below 50 users, so the reason has to stay next to the edit.
+    assert "docs.openwebui.com/license" in dockerfile
+    # A silently failing sed would leave the suffix in place, so the layer checks its own work.
+    assert "! grep -q" in dockerfile
 
 
 def test_the_chat_ui_reaches_only_this_service_and_nothing_outside() -> None:
@@ -96,6 +108,7 @@ def test_branding_is_one_mounted_file_and_is_written_before_the_ui_starts() -> N
 
     # Mounting the whole static directory would hide the image's own assets behind it.
     assert "./branding/custom.css:/app/backend/open_webui/static/custom.css:ro" in webui["volumes"]
+    assert "./branding/loader.js:/app/backend/open_webui/static/loader.js:ro" in webui["volumes"]
     assert webui["environment"]["WEBUI_NAME"] == "${BRAND_NAME:-Product Memory}"
     # Docker creates a directory in its place if the file is missing, so it must exist first.
     assert "\nstart: branding\n" in makefile

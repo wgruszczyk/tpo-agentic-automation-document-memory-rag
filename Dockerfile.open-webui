@@ -1,0 +1,13 @@
+# Open WebUI with the "(Open WebUI)" suffix its env.py appends to WEBUI_NAME removed.
+#
+# Their licence allows full rebranding for deployments of 50 or fewer users in a rolling 30-day
+# window: https://docs.openwebui.com/license. This one serves a single user on loopback. Past that
+# threshold the branding has to go back, so delete this file and drop the build: block in compose.
+
+ARG OPEN_WEBUI_IMAGE=ghcr.io/open-webui/open-webui:v0.11.3
+FROM ${OPEN_WEBUI_IMAGE}
+
+# Deletes the conditional and its body together; removing only the body would leave an empty if.
+RUN sed -i "/^if WEBUI_NAME != 'Open WebUI':$/,+1d" /app/backend/open_webui/env.py \
+    && ! grep -q "WEBUI_NAME += ' (Open WebUI)'" /app/backend/open_webui/env.py \
+    && python -c "import ast, pathlib; ast.parse(pathlib.Path('/app/backend/open_webui/env.py').read_text())"
